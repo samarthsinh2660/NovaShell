@@ -23,6 +23,16 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
+# Find SQLite3 (required for internal database)
+find_library(SQLITE3_LIBRARY sqlite3)
+if(NOT SQLITE3_LIBRARY)
+    message(STATUS "SQLite3 not found. Internal database features will be limited.")
+    set(HAVE_SQLITE3 FALSE)
+else()
+    set(HAVE_SQLITE3 TRUE)
+    message(STATUS "SQLite3 found: ${SQLITE3_LIBRARY}")
+endif()
+
 if(ENABLE_NETWORK AND UNIX)
     find_library(PCAP_LIBRARY pcap)
     if(PCAP_LIBRARY)
@@ -35,6 +45,7 @@ set(CORE_SOURCES
     src/core/shell.cpp
     src/core/command_processor.cpp
     src/core/command_registry.cpp
+    src/core/tab_completion.cpp
 )
 
 set(VFS_SOURCES
@@ -116,6 +127,15 @@ set(SCHEDULER_SOURCES
     src/scheduler/task_scheduler.cpp
 )
 
+set(DATABASE_SOURCES
+    src/database/internal_db.cpp
+    src/database/db_manager.cpp
+)
+
+set(GIT_SOURCES
+    src/git/git_manager.cpp
+)
+
 # Main executable
 add_executable(customos-shell
     src/main.cpp
@@ -136,6 +156,8 @@ add_executable(customos-shell
     ${ENV_SOURCES}
     ${P2P_SOURCES}
     ${SCHEDULER_SOURCES}
+    ${DATABASE_SOURCES}
+    ${GIT_SOURCES}
 )
 
 # Link libraries
@@ -145,6 +167,11 @@ target_link_libraries(customos-shell
     Threads::Threads
     ${CMAKE_DL_LIBS}
 )
+
+if(HAVE_SQLITE3)
+    target_link_libraries(customos-shell ${SQLITE3_LIBRARY})
+    target_compile_definitions(customos-shell PRIVATE HAVE_SQLITE3)
+endif()
 
 if(HAVE_PCAP)
     target_link_libraries(customos-shell ${PCAP_LIBRARY})
