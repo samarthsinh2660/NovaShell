@@ -1,0 +1,82 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+bin/
+lib/
+
+# CMake files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Compiled Object files
+*.o
+*.obj
+*.lo
+*.slo
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.lib
+*.lai
+*.la
+
+# Executables
+*.exe
+*.out
+*.app
+customos-shell
+customos-shell.exe
+
+# IDE files
+.vscode/
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Log files
+*.log
+customos.log
+
+# Configuration files (with user data)
+.customos/
+*.vault
+*.enc
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.old
+
+# Test results
+Testing/
+test_results/
+
+# Package files
+*.tar.gz
+*.zip
+*.7z
+
+# Generated documentation
+docs/html/
+docs/latex/

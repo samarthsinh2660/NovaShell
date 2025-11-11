@@ -1,0 +1,71 @@
+{
+  "shell": {
+    "prompt": "customos> ",
+    "history_size": 1000,
+    "auto_save": true,
+    "color_output": true
+  },
+  "ai": {
+    "enabled": true,
+    "provider": "gemini",
+    "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE",
+    "auto_suggest": true,
+    "suggestion_delay_ms": 500
+  },
+  "vault": {
+    "encryption": "AES-256-GCM",
+    "key_derivation": "PBKDF2",
+    "iterations": 100000,
+    "auto_lock_minutes": 15
+  },
+  "network": {
+    "default_interface": "eth0",
+    "capture_buffer": 65536,
+    "max_packets": 10000
+  },
+  "logging": {
+    "level": "info",
+    "max_size_mb": 100,
+    "retention_days": 30,
+    "console_output": false,
+    "file_output": true
+  },
+  "remote": {
+    "ssh_enabled": false,
+    "ssh_port": 2222,
+    "max_connections": 10,
+    "idle_timeout_seconds": 300
+  },
+  "containers": {
+    "docker_socket": "/var/run/docker.sock",
+    "auto_pull_images": false
+  },
+  "monitor": {
+    "enabled": true,
+    "update_interval_ms": 1000,
+    "cpu_threshold": 90,
+    "memory_threshold": 90,
+    "disk_threshold": 90
+  },
+  "p2p": {
+    "enabled": false,
+    "port": 8888,
+    "encryption_enabled": true,
+    "require_auth": false,
+    "discover_peers": true
+  },
+  "scheduler": {
+    "enabled": true,
+    "check_interval_seconds": 1,
+    "reminder_sound": true
+  },
+  "notes": {
+    "storage_path": ".customos/notes",
+    "auto_save": true,
+    "backup_enabled": true
+  },
+  "environment": {
+    "auto_detect_sdks": true,
+    "default_profile": "default"
+  }
+}
