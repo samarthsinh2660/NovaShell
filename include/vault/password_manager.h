@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <optional>
+#include "compat/optional.h"  // Compatibility layer for older compilers
 
 namespace customos {
 namespace vault {
@@ -47,7 +47,7 @@ public:
     bool add_password(const PasswordEntry& entry);
     bool update_password(const std::string& service, const PasswordEntry& entry);
     bool delete_password(const std::string& service);
-    std::optional<PasswordEntry> get_password(const std::string& service);
+    customos::optional<PasswordEntry> get_password(const std::string& service);
     std::vector<PasswordEntry> list_passwords();
     std::vector<PasswordEntry> search_passwords(const std::string& query);
 

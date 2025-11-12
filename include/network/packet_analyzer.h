@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <map>
 #include <functional>
 
 namespace customos {

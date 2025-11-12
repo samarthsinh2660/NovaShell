@@ -3,8 +3,9 @@
 
 #include <string>
 #include <vector>
-#include <memory>
 #include <map>
+#include <cstdint>
+#include <memory>
 
 namespace customos {
 namespace containers {

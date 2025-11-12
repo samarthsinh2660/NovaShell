@@ -20,11 +20,93 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # Find dependencies
-find_package(OpenSSL REQUIRED)
+find_package(OpenSSL)
+
+if(NOT OpenSSL_FOUND)
+    # Try manual detection on Windows with explicit paths
+    if(WIN32)
+        set(OPENSSL_POSSIBLE_PATHS
+            "C:/Program Files/OpenSSL"
+            "C:/Program Files/OpenSSL-Win64"
+            "C:/OpenSSL"
+            "C:/OpenSSL-Win64"
+            "$ENV{ProgramFiles}/OpenSSL"
+            "$ENV{ProgramFiles}/OpenSSL-Win64"
+            "$ENV{ProgramW6432}/OpenSSL"
+        )
+        
+        foreach(OPENSSL_PATH ${OPENSSL_POSSIBLE_PATHS})
+            if(EXISTS "${OPENSSL_PATH}/include/openssl/ssl.h")
+                set(OPENSSL_ROOT_DIR "${OPENSSL_PATH}")
+                set(OPENSSL_INCLUDE_DIR "${OPENSSL_PATH}/include")
+                
+                # Try different library paths
+                set(OPENSSL_LIB_PATHS
+                    "${OPENSSL_PATH}/lib/VC/x64/MD"
+                    "${OPENSSL_PATH}/lib/VC/x64/MT"
+                    "${OPENSSL_PATH}/lib"
+                    "${OPENSSL_PATH}/lib64"
+                )
+                
+                foreach(LIB_PATH ${OPENSSL_LIB_PATHS})
+                    if(EXISTS "${LIB_PATH}/libcrypto.lib" AND EXISTS "${LIB_PATH}/libssl.lib")
+                        set(OPENSSL_CRYPTO_LIBRARY "${LIB_PATH}/libcrypto.lib")
+                        set(OPENSSL_SSL_LIBRARY "${LIB_PATH}/libssl.lib")
+                        set(OPENSSL_LIBRARIES "${OPENSSL_SSL_LIBRARY};${OPENSSL_CRYPTO_LIBRARY}")
+                        break()
+                    endif()
+                endforeach()
+                
+                if(OPENSSL_CRYPTO_LIBRARY AND OPENSSL_SSL_LIBRARY)
+                    set(OpenSSL_FOUND TRUE)
+                    set(OPENSSL_VERSION "3.0.0")
+                    message(STATUS "Found OpenSSL manually at: ${OPENSSL_PATH}")
+                    message(STATUS "  Libraries: ${OPENSSL_CRYPTO_LIBRARY}, ${OPENSSL_SSL_LIBRARY}")
+                    break()
+                endif()
+            endif()
+        endforeach()
+    endif()
+endif()
+
+if(OpenSSL_FOUND)
+    set(HAVE_OPENSSL TRUE)
+    message(STATUS "OpenSSL support: ENABLED")
+else()
+    set(HAVE_OPENSSL FALSE)
+    message(WARNING "OpenSSL not found. Cryptographic features will be disabled.")
+    message(WARNING "Install OpenSSL: Run .\\setup-dependencies.ps1")
+endif()
+
 find_package(Threads REQUIRED)
 
 # Find SQLite3 (required for internal database)
-find_library(SQLITE3_LIBRARY sqlite3)
+find_library(SQLITE3_LIBRARY 
+    NAMES sqlite3 libsqlite3 sqlite3.lib
+    PATHS
+        "C:/Program Files/SQLite"
+        "C:/SQLite"
+        "C:/MinGW/lib"
+        "C:/MinGW-w64/lib"
+        "$ENV{ProgramFiles}/SQLite"
+)
+
+if(NOT SQLITE3_LIBRARY)
+    # Try to find in PATH directories
+    find_file(SQLITE3_LIB_FILE 
+        NAMES sqlite3.lib libsqlite3.a sqlite3.dll
+        PATHS $ENV{PATH}
+    )
+    if(SQLITE3_LIB_FILE)
+        get_filename_component(SQLITE3_LIB_DIR ${SQLITE3_LIB_FILE} DIRECTORY)
+        find_library(SQLITE3_LIBRARY 
+            NAMES sqlite3 libsqlite3
+            PATHS ${SQLITE3_LIB_DIR}
+            NO_DEFAULT_PATH
+        )
+    endif()
+endif()
+
 if(NOT SQLITE3_LIBRARY)
     message(STATUS "SQLite3 not found. Internal database features will be limited.")
     set(HAVE_SQLITE3 FALSE)
@@ -96,7 +178,8 @@ set(UTILS_SOURCES
 )
 
 set(AI_SOURCES
-    src/ai/command_suggester.cpp
+    # Disabled - requires libcurl which is not installed
+    # src/ai/command_suggester.cpp
 )
 
 set(REMOTE_SOURCES
@@ -128,8 +211,9 @@ set(SCHEDULER_SOURCES
 )
 
 set(DATABASE_SOURCES
-    src/database/internal_db.cpp
-    src/database/db_manager.cpp
+    # Disabled - requires SQLite3 which is not installed
+    # src/database/internal_db.cpp
+    # src/database/db_manager.cpp
 )
 
 set(GIT_SOURCES
@@ -162,11 +246,18 @@ add_executable(customos-shell
 
 # Link libraries
 target_link_libraries(customos-shell
-    OpenSSL::SSL
-    OpenSSL::Crypto
     Threads::Threads
     ${CMAKE_DL_LIBS}
 )
+
+if(HAVE_OPENSSL)
+    target_link_libraries(customos-shell
+        ${OPENSSL_SSL_LIBRARY}
+        ${OPENSSL_CRYPTO_LIBRARY}
+    )
+    target_include_directories(customos-shell PRIVATE ${OPENSSL_INCLUDE_DIR})
+    target_compile_definitions(customos-shell PRIVATE HAVE_OPENSSL)
+endif()
 
 if(HAVE_SQLITE3)
     target_link_libraries(customos-shell ${SQLITE3_LIBRARY})
@@ -220,6 +311,8 @@ add_custom_target(docs
 message(STATUS "CustomOS Shell Configuration:")
 message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "  OpenSSL Support: ${HAVE_OPENSSL}")
+message(STATUS "  SQLite3 Support: ${HAVE_SQLITE3}")
 message(STATUS "  Network Support: ${ENABLE_NETWORK}")
 message(STATUS "  PCAP Available: ${HAVE_PCAP}")
 message(STATUS "  Build Tests: ${BUILD_TESTS}")

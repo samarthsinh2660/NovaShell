@@ -2,8 +2,10 @@
 #include <map>
 #include <mutex>
 #include <random>
+#ifdef HAVE_OPENSSL
 #include <openssl/evp.h>
 #include <openssl/aes.h>
+#endif
 
 namespace customos {
 namespace vault {
@@ -114,11 +116,11 @@ bool PasswordManager::delete_password(const std::string& service) {
     return pimpl_->passwords.erase(service) > 0;
 }
 
-std::optional<PasswordEntry> PasswordManager::get_password(const std::string& service) {
+customos::optional<PasswordEntry> PasswordManager::get_password(const std::string& service) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
     
     if (!pimpl_->unlocked) {
-        return std::nullopt;
+        return customos::nullopt;
     }
 
     auto it = pimpl_->passwords.find(service);
@@ -126,7 +128,7 @@ std::optional<PasswordEntry> PasswordManager::get_password(const std::string& se
         return it->second;
     }
 
-    return std::nullopt;
+    return customos::nullopt;
 }
 
 std::vector<PasswordEntry> PasswordManager::list_passwords() {

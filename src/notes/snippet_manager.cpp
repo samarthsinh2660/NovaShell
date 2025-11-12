@@ -1,5 +1,6 @@
 #include "notes/snippet_manager.h"
 #include <map>
+#include <set>
 #include <mutex>
 #include <fstream>
 #include <sstream>

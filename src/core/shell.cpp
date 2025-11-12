@@ -9,6 +9,7 @@
 #include <sstream>
 #include <fstream>
 #include <cstdlib>
+#include <csignal>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -42,8 +43,7 @@ bool Shell::initialize() {
         auto& logger = logging::Logger::instance();
         logger.set_log_level(logging::LogLevel::INFO);
         logger.enable_console_output(false);
-        logger.enable_file_output(true);
-        logger.set_log_file("customos.log");
+        logger.enable_file_output(false);  // Disable file logging
 
         LOG_INFO("Initializing CustomOS Shell...");
 
@@ -74,10 +74,10 @@ bool Shell::initialize() {
 
 void Shell::display_welcome() {
     std::cout << "\n";
-    std::cout << "╔════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║          CustomOS Shell - Advanced System Manager         ║\n";
-    std::cout << "║                     Version 1.0.0                          ║\n";
-    std::cout << "╚════════════════════════════════════════════════════════════╝\n";
+    std::cout << "=======================================================\n";
+    std::cout << "                 NovaShell v1.0.0                      \n";
+    std::cout << "         Advanced Command Line Interface               \n";
+    std::cout << "=======================================================\n";
     std::cout << "\n";
     std::cout << "Type 'help' for available commands or 'exit' to quit.\n";
     std::cout << "\n";
@@ -134,6 +134,11 @@ bool Shell::execute_command(const std::string& command) {
 #else
         system("clear");
 #endif
+        return true;
+    }
+
+    if (command == "help") {
+        show_help();
         return true;
     }
 
@@ -208,6 +213,35 @@ void Shell::handle_signal(int signal) {
         std::cout << prompt_;
         std::cout.flush();
     }
+}
+
+void Shell::show_help() {
+    std::cout << "NovaShell Help" << std::endl;
+    std::cout << "==============" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Basic Commands:" << std::endl;
+    std::cout << "  help     - Show this help message" << std::endl;
+    std::cout << "  version  - Show version information" << std::endl;
+    std::cout << "  echo     - Display text" << std::endl;
+    std::cout << "  whoami   - Show current user" << std::endl;
+    std::cout << "  login    - Login as a user" << std::endl;
+    std::cout << "  exit     - Exit the shell" << std::endl;
+    std::cout << "  quit     - Exit the shell" << std::endl;
+    std::cout << "  clear    - Clear the screen" << std::endl;
+    std::cout << "  cls      - Clear the screen (Windows)" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Available Modules:" << std::endl;
+    std::cout << "  git      - Git version control commands" << std::endl;
+    std::cout << "  db       - Database operations" << std::endl;
+    std::cout << "  vault    - Password management" << std::endl;
+    std::cout << "  net      - Network analysis tools" << std::endl;
+    std::cout << "  monitor  - System monitoring" << std::endl;
+    std::cout << "  ai       - AI-powered suggestions" << std::endl;
+    std::cout << "  note     - Note and snippet management" << std::endl;
+    std::cout << "  env      - Environment management" << std::endl;
+    std::cout << std::endl;
+    std::cout << "For detailed help on any command, type: help <command>" << std::endl;
+    std::cout << std::endl;
 }
 
 } // namespace core

@@ -1,8 +1,10 @@
 #include "auth/authentication.h"
 #include <map>
 #include <mutex>
+#ifdef HAVE_OPENSSL
 #include <openssl/sha.h>
 #include <openssl/rand.h>
+#endif
 
 namespace customos {
 namespace auth {
@@ -24,6 +26,7 @@ struct Authentication::Impl {
     std::mutex mutex;
 
     std::string hash_password(const std::string& password, const std::string& salt) {
+#ifdef HAVE_OPENSSL
         std::string salted = password + salt;
         unsigned char hash[SHA256_DIGEST_LENGTH];
         SHA256(reinterpret_cast<const unsigned char*>(salted.c_str()), salted.length(), hash);
@@ -35,9 +38,14 @@ struct Authentication::Impl {
             result += buf;
         }
         return result;
+#else
+        // Fallback: simple hash when OpenSSL not available (NOT SECURE)
+        return password + salt + "_insecure_hash";
+#endif
     }
 
     std::string generate_salt() {
+#ifdef HAVE_OPENSSL
         unsigned char salt[16];
         RAND_bytes(salt, sizeof(salt));
         
@@ -48,6 +56,13 @@ struct Authentication::Impl {
             result += buf;
         }
         return result;
+#else
+        // Fallback: pseudo-random salt when OpenSSL not available (NOT SECURE)
+        srand(static_cast<unsigned int>(time(nullptr)));
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%016x", rand());
+        return std::string(buf);
+#endif
     }
 };
 

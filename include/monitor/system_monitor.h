@@ -3,8 +3,10 @@
 
 #include <string>
 #include <vector>
-#include <memory>
 #include <map>
+#include <cstdint>
+#include <functional>
+#include <memory>
 
 namespace customos {
 namespace monitor {

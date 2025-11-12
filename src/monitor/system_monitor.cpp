@@ -1,7 +1,9 @@
 #include "monitor/system_monitor.h"
-#include <mutex>
+#include <iostream>
 #include <thread>
 #include <chrono>
+#include <mutex>
+#include <functional>
 
 #ifdef _WIN32
 #include <windows.h>

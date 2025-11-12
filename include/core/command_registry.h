@@ -6,6 +6,7 @@
 #include <map>
 #include <functional>
 #include <memory>
+#include <mutex>
 
 namespace customos {
 namespace core {

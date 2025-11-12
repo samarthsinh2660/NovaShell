@@ -63,7 +63,7 @@ struct TabCompletion::Impl {
         });
         
         // Limit to max_suggestions
-        if (filtered.size() > max_suggestions) {
+        if (filtered.size() > static_cast<size_t>(max_suggestions)) {
             filtered.resize(max_suggestions);
         }
         
@@ -239,6 +239,7 @@ std::vector<CompletionMatch> TabCompletion::complete_git_branches(const std::str
 std::vector<CompletionMatch> TabCompletion::complete_db_tables(const std::string& prefix) {
     std::vector<CompletionMatch> matches;
     
+#ifdef HAVE_SQLITE3
     auto tables = database::DBManager::instance().list_tables();
     for (const auto& table : tables) {
         if (pimpl_->matches(table, prefix)) {
@@ -249,6 +250,7 @@ std::vector<CompletionMatch> TabCompletion::complete_db_tables(const std::string
             matches.push_back(match);
         }
     }
+#endif
     
     return matches;
 }
@@ -256,6 +258,7 @@ std::vector<CompletionMatch> TabCompletion::complete_db_tables(const std::string
 std::vector<CompletionMatch> TabCompletion::complete_db_columns(const std::string& table, const std::string& prefix) {
     std::vector<CompletionMatch> matches;
     
+#ifdef HAVE_SQLITE3
     auto columns = database::DBManager::instance().list_columns(table);
     for (const auto& column : columns) {
         if (pimpl_->matches(column, prefix)) {
@@ -266,6 +269,7 @@ std::vector<CompletionMatch> TabCompletion::complete_db_columns(const std::strin
             matches.push_back(match);
         }
     }
+#endif
     
     return matches;
 }

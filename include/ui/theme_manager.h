@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <map>
+#include <cstdint>
 
 namespace novashell {
 namespace ui {

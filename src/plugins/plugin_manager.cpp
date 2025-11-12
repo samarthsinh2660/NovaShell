@@ -2,6 +2,7 @@
 #include <map>
 #include <mutex>
 #include <vector>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <windows.h>

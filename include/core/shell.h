@@ -35,6 +35,7 @@ public:
 
 private:
     void display_welcome();
+    void show_help();
     void load_configuration();
     void save_history();
     std::string read_input();

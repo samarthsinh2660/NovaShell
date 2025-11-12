@@ -157,7 +157,7 @@ void CommandProcessor::register_builtin_commands() {
     version_cmd.description = "Display version information";
     version_cmd.usage = "version";
     version_cmd.handler = [](const CommandContext&) -> int {
-        std::cout << "CustomOS Shell v1.0.0\n";
+        std::cout << "NovaShell v1.0.0\n";
         std::cout << "Build date: " << __DATE__ << " " << __TIME__ << "\n";
         return 0;
     };
