@@ -158,10 +158,218 @@ void CommandProcessor::register_builtin_commands() {
     CommandInfo help_cmd;
     help_cmd.name = "help";
     help_cmd.description = "Display help information";
-    help_cmd.usage = "help [command]";
+    help_cmd.usage = "help [category|command]";
     help_cmd.handler = [this](const CommandContext& ctx) -> int {
         if (ctx.args.empty()) {
-            std::cout << "Available commands:\n\n";
+            // Show category selection
+            std::cout << "🆘 NovaShell Help System\n";
+            std::cout << "========================\n\n";
+            std::cout << "Available Categories:\n\n";
+            std::cout << "1. 🔐 Authentication    - User login and account management\n";
+            std::cout << "2. 🔑 Password Vault    - Secure password storage and management\n";
+            std::cout << "3. 🔀 Git Integration   - Version control operations\n";
+            std::cout << "4. 🌐 Network Tools     - Packet analysis and monitoring\n";
+            std::cout << "5. 🐳 Container Mgmt    - Docker/Podman operations\n";
+            std::cout << "6. 📊 System Monitor    - Real-time system metrics\n";
+            std::cout << "7. 📝 Notes & Snippets  - Knowledge management\n";
+            std::cout << "8. ⏰ Task Scheduling   - Automated task management\n";
+            std::cout << "9. 🤖 AI Features       - Intelligent command suggestions\n";
+            std::cout << "10. 🌐 Remote Access    - SSH server management\n";
+            std::cout << "11. 🎨 Themes           - Visual customization\n";
+            std::cout << "12. 🎤 Voice Commands   - Speech-to-text interface\n";
+            std::cout << "13. 📊 Analytics        - Dashboard and metrics\n";
+            std::cout << "14. 🔧 Environment Mgr  - Development environment switching\n";
+            std::cout << "15. 🛠️ File System      - File and directory operations\n";
+            std::cout << "16. 🏗️ Virtual FS       - Cross-platform file management\n";
+            std::cout << "17. 💾 Database         - SQL database operations\n";
+            std::cout << "18. 📦 P2P Sharing      - LAN file sharing\n";
+            std::cout << "19. 🔌 Plugins          - Extension system\n";
+            std::cout << "20. ⚙️ Scripting        - Script execution\n";
+            std::cout << "21. 📋 Logging          - System logs and audit trails\n";
+            std::cout << "22. 🛠️ Utilities        - General-purpose commands\n\n";
+            std::cout << "📖 For detailed guide, see: COMMAND_REFERENCE.md\n\n";
+            std::cout << "Usage:\n";
+            std::cout << "  help <number>     - Show commands in category\n";
+            std::cout << "  help <category>   - Show commands in category\n";
+            std::cout << "  help <command>    - Show detailed command help\n";
+            std::cout << "  help all          - Show all commands\n\n";
+            return 0;
+        }
+
+        std::string arg = ctx.args[0];
+
+        // Handle category selection by number
+        if (arg == "1" || arg == "authentication" || arg == "auth") {
+            show_category_help("🔐 Authentication", {
+                {"login <username>", "Authenticate as a user to access NovaShell features"},
+                {"logout", "End current user session"},
+                {"create-user <username> <password>", "Create a new user account"},
+                {"whoami", "Display current logged-in user"}
+            });
+        }
+        else if (arg == "2" || arg == "vault" || arg == "password") {
+            show_category_help("🔑 Password Vault", {
+                {"vault-init", "Initialize password vault with master password"},
+                {"vault-unlock", "Unlock vault for password operations"},
+                {"vault-lock", "Lock vault to prevent access"},
+                {"vault-add", "Add a new password entry"},
+                {"vault-list", "List all stored passwords"},
+                {"vault-get <service>", "Retrieve password for a specific service"},
+                {"vault-delete <service>", "Remove a password entry"},
+                {"vault-search <query>", "Search passwords by service name or username"}
+            });
+        }
+        else if (arg == "3" || arg == "git") {
+            show_category_help("🔀 Git Integration", {
+                {"git-status", "Show current repository status"},
+                {"git-add <file> [--all]", "Stage files for commit"},
+                {"git-commit <message>", "Commit staged changes"},
+                {"git-log [limit]", "Show commit history"},
+                {"git-branch [name]", "List branches or create new branch"},
+                {"git-checkout <branch>", "Switch to different branch"},
+                {"git-pull [remote] [branch]", "Fetch and merge from remote"},
+                {"git-push [remote] [branch]", "Push commits to remote repository"}
+            });
+        }
+        else if (arg == "4" || arg == "network" || arg == "net") {
+            show_category_help("🌐 Network Tools", {
+                {"net-interfaces", "List available network interfaces"},
+                {"net-stats", "Show network traffic statistics"},
+                {"net-capture [interface]", "Start packet capture on interface"},
+                {"net-stop", "Stop current packet capture"},
+                {"net-packets [count]", "Show recently captured packets"},
+                {"net-protocols", "Show protocol distribution statistics"}
+            });
+        }
+        else if (arg == "5" || arg == "docker" || arg == "container") {
+            show_category_help("🐳 Container Management", {
+                {"docker-init", "Initialize container runtime connection"},
+                {"docker-ps [--all]", "List containers"},
+                {"docker-run <image> <name>", "Create and start a new container"},
+                {"docker-stop <container>", "Stop a running container"},
+                {"docker-start <container>", "Start a stopped container"},
+                {"docker-rm [--force] <container>", "Remove a container"},
+                {"docker-images", "List container images"},
+                {"docker-pull <image>", "Pull a container image"}
+            });
+        }
+        else if (arg == "6" || arg == "monitor" || arg == "system") {
+            show_category_help("📊 System Monitoring", {
+                {"monitor-cpu", "Show CPU information and usage"},
+                {"monitor-memory", "Show memory usage statistics"},
+                {"monitor-disk", "Show disk usage information"},
+                {"monitor-network", "Show network interface information"},
+                {"monitor-processes [--cpu]", "Show running processes"},
+                {"monitor-system", "Show general system information"}
+            });
+        }
+        else if (arg == "7" || arg == "notes" || arg == "snippets") {
+            show_category_help("📝 Notes & Snippets", {
+                {"note-add <title>", "Add a new note"},
+                {"note-list [category]", "List notes, optionally filtered by category"},
+                {"note-get <id>", "View a specific note"},
+                {"snippet-add <title> <language>", "Add a code snippet"},
+                {"snippet-list [language]", "List code snippets, optionally filtered by language"},
+                {"snippet-get <id>", "View a specific code snippet"}
+            });
+        }
+        else if (arg == "8" || arg == "scheduler" || arg == "task") {
+            show_category_help("⏰ Task Scheduling", {
+                {"scheduler-init", "Initialize the task scheduler"},
+                {"task-schedule <title> <command> <minutes>", "Schedule a command to run after specified minutes"},
+                {"task-list [category]", "List scheduled tasks"},
+                {"task-cancel <task_id>", "Cancel a scheduled task"},
+                {"task-run <task_id>", "Execute a scheduled task immediately"},
+                {"remind-add <title> <minutes>", "Set a reminder for specified minutes from now"},
+                {"remind-list", "Show active reminders"}
+            });
+        }
+        else if (arg == "9" || arg == "ai") {
+            show_category_help("🤖 AI Features", {
+                {"ai-init <api_key>", "Initialize AI suggestions with Gemini API key"},
+                {"ai-suggest [context]", "Get AI-powered command suggestions"}
+            });
+        }
+        else if (arg == "10" || arg == "remote" || arg == "ssh") {
+            show_category_help("🌐 Remote Access", {
+                {"ssh-start [port]", "Start SSH server for remote connections"},
+                {"ssh-stop", "Stop the SSH server"},
+                {"ssh-connections", "Show active SSH connections"}
+            });
+        }
+        else if (arg == "11" || arg == "theme" || arg == "themes") {
+            show_category_help("🎨 Themes", {
+                {"theme-list", "List available themes"},
+                {"theme-set <theme>", "Apply a specific theme"},
+                {"theme-create <name>", "Create a custom theme"}
+            });
+        }
+        else if (arg == "12" || arg == "voice") {
+            show_category_help("🎤 Voice Commands", {
+                {"voice-config [api_key]", "Configure voice recognition"},
+                {"voice-start", "Start voice command recognition"},
+                {"voice-stop", "Stop voice command recognition"}
+            });
+        }
+        else if (arg == "13" || arg == "analytics" || arg == "dashboard") {
+            show_category_help("📊 Analytics", {
+                {"dashboard [name]", "Show analytics dashboard"},
+                {"analytics [metric]", "Show analytics metrics or overview"}
+            });
+        }
+        else if (arg == "14" || arg == "environment" || arg == "env") {
+            show_category_help("🔧 Environment Manager", {
+                {"env-list", "List available environment profiles"},
+                {"env-create <name> [description]", "Create a new environment profile"},
+                {"env-switch <profile>", "Switch to a different environment profile"}
+            });
+        }
+        else if (arg == "15" || arg == "filesystem" || arg == "files") {
+            show_category_help("🛠️ File System", {
+                {"file-list [directory]", "List files and directories"}
+            });
+        }
+        else if (arg == "16" || arg == "vfs") {
+            show_category_help("🏗️ Virtual File System", {
+                {"vfs-mount <device> <mount_point> [type]", "Mount a filesystem"}
+            });
+        }
+        else if (arg == "17" || arg == "database" || arg == "db") {
+            show_category_help("💾 Database", {
+                {"db-connect <type> <name> <connection_details>", "Connect to a database"}
+            });
+        }
+        else if (arg == "18" || arg == "p2p") {
+            show_category_help("📦 P2P Sharing", {
+                {"p2p-share <file> [--public]", "Share a file via P2P on the local network"}
+            });
+        }
+        else if (arg == "19" || arg == "plugin" || arg == "plugins") {
+            show_category_help("🔌 Plugins", {
+                {"plugin-list", "List loaded plugins and their capabilities"}
+            });
+        }
+        else if (arg == "20" || arg == "scripting" || arg == "script") {
+            show_category_help("⚙️ Scripting", {
+                {"script-run <script_file>", "Execute a script file"}
+            });
+        }
+        else if (arg == "21" || arg == "logging" || arg == "logs") {
+            show_category_help("📋 Logging", {
+                {"log-show [count]", "Show recent system logs and audit entries"}
+            });
+        }
+        else if (arg == "22" || arg == "utilities" || arg == "util") {
+            show_category_help("🛠️ Utilities", {
+                {"help [category|command]", "Show help for categories or specific commands"},
+                {"version", "Show NovaShell version information"},
+                {"echo <text>", "Display text or variables"}
+            });
+        }
+        else if (arg == "all") {
+            // Show all commands
+            std::cout << "All Available Commands:\n";
+            std::cout << "======================\n\n";
             auto commands = registry_->list_commands();
             std::sort(commands.begin(), commands.end());
             for (const auto& cmd_name : commands) {
@@ -170,17 +378,21 @@ void CommandProcessor::register_builtin_commands() {
                     std::cout << "  " << info->name << " - " << info->description << "\n";
                 }
             }
-            std::cout << "\nType 'help <command>' for detailed information.\n";
+            std::cout << "\nTotal commands: " << commands.size() << "\n";
+            std::cout << "📖 See COMMAND_REFERENCE.md for detailed usage examples.\n";
         }
         else {
-            const auto* info = registry_->get_command(ctx.args[0]);
+            // Try to find specific command
+            const auto* info = registry_->get_command(arg);
             if (info) {
                 std::cout << "Command: " << info->name << "\n";
                 std::cout << "Description: " << info->description << "\n";
                 std::cout << "Usage: " << info->usage << "\n";
+                std::cout << "\n📖 For examples and detailed usage, see COMMAND_REFERENCE.md\n";
             }
             else {
-                std::cout << "Unknown command: " << ctx.args[0] << "\n";
+                std::cout << "Unknown category or command: " << arg << "\n";
+                std::cout << "Type 'help' to see available categories.\n";
                 return 1;
             }
         }
@@ -2992,4 +3204,18 @@ void CommandProcessor::register_builtin_commands() {
         }
     };
     registry_->register_command(env_create_cmd);
+}
+
+// Helper function for showing category help
+void show_category_help(const std::string& category_name, const std::vector<std::pair<std::string, std::string>>& commands) {
+    std::cout << category_name << " Commands:\n";
+    std::cout << std::string(category_name.length() + 10, '=') << "\n\n";
+    
+    for (const auto& cmd : commands) {
+        std::cout << cmd.first << "\n";
+        std::cout << "  " << cmd.second << "\n\n";
+    }
+    
+    std::cout << "Type 'help <command>' for detailed usage examples.\n";
+    std::cout << "📖 See COMMAND_REFERENCE.md for comprehensive examples.\n";
 }
