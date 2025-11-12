@@ -39,6 +39,7 @@ private:
     void load_configuration();
     void save_history();
     std::string read_input();
+    std::string read_input_with_completion();
     void handle_signal(int signal);
 
     std::unique_ptr<CommandProcessor> command_processor_;
@@ -46,6 +47,8 @@ private:
     std::string prompt_;
     bool running_;
     bool initialized_;
+    std::vector<std::string> command_history_;
+    int history_index_;
 };
 
 } // namespace core

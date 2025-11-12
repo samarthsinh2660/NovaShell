@@ -5,6 +5,7 @@
 #include "vfs/virtual_filesystem.h"
 #include "vault/password_manager.h"
 #include "network/packet_analyzer.h"
+#include "core/tab_completion.h"
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -24,7 +25,8 @@ namespace core {
 Shell::Shell() 
     : prompt_("novashell> ")
     , running_(false)
-    , initialized_(false) {
+    , initialized_(false)
+    , history_index_(-1) {
 }
 
 Shell::~Shell() {
@@ -53,6 +55,12 @@ bool Shell::initialize() {
         command_processor_ = std::make_unique<CommandProcessor>();
         if (!command_processor_->initialize()) {
             LOG_ERROR("Failed to initialize command processor");
+            return false;
+        }
+
+        // Initialize tab completion
+        if (!core::TabCompletion::instance().initialize()) {
+            LOG_ERROR("Failed to initialize tab completion");
             return false;
         }
 
@@ -97,8 +105,8 @@ void Shell::run() {
             std::cout << prompt_;
             std::cout.flush();
 
-            // Read input
-            std::string input = read_input();
+            // Read input with tab completion
+            std::string input = read_input_with_completion();
 
             // Skip empty lines
             if (input.empty()) {
@@ -120,6 +128,14 @@ void Shell::run() {
 bool Shell::execute_command(const std::string& command) {
     if (command.empty()) {
         return true;
+    }
+
+    // Add command to history (avoid duplicates of last command)
+    if (command_history_.empty() || command_history_.back() != command) {
+        command_history_.push_back(command);
+        if (command_history_.size() > 1000) {  // Keep last 1000 commands
+            command_history_.erase(command_history_.begin());
+        }
     }
 
     // Check for built-in shell commands
@@ -205,6 +221,177 @@ std::string Shell::read_input() {
     }
     
     return line;
+}
+
+std::string Shell::read_input_with_completion() {
+    std::string input;
+    std::string current_line;
+    size_t cursor_pos = 0;
+    std::vector<std::string> completion_matches;
+    size_t completion_index = 0;
+    std::string original_line;  // Store the line being edited for history
+
+#ifdef _WIN32
+    HANDLE hConsole = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode;
+    GetConsoleMode(hConsole, &mode);
+    SetConsoleMode(hConsole, mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT));
+#endif
+
+    while (true) {
+        int ch = 0;
+
+#ifdef _WIN32
+        DWORD read;
+        ReadConsole(hConsole, &ch, 1, &read, NULL);
+#else
+        ch = getchar();
+#endif
+
+        if (ch == '\n' || ch == '\r') {
+            std::cout << "\n";
+            history_index_ = -1;  // Reset history navigation
+            break;
+        }
+        else if (ch == '\t') {  // Tab key pressed
+            if (completion_matches.empty()) {
+                // Get completions for current input
+                auto matches = core::TabCompletion::instance().complete(current_line, cursor_pos);
+                for (const auto& match : matches) {
+                    completion_matches.push_back(match.text);
+                }
+                completion_index = 0;
+            }
+
+            if (!completion_matches.empty()) {
+                // Show current completion
+                std::string completion = completion_matches[completion_index];
+
+                // Update line and redraw
+                current_line = completion;
+                cursor_pos = current_line.length();
+
+                std::cout << "\r" << prompt_;
+                std::cout << current_line;
+                std::cout.flush();
+
+                // Move to next completion for next tab
+                completion_index = (completion_index + 1) % completion_matches.size();
+            }
+        }
+        else if (ch == 27) {  // ESC key - start of escape sequence
+            // Read the next characters to detect arrow keys
+            int seq1 = 0, seq2 = 0;
+            
+#ifdef _WIN32
+            ReadConsole(hConsole, &seq1, 1, &read, NULL);
+            if (seq1 == '[') {
+                ReadConsole(hConsole, &seq2, 1, &read, NULL);
+            }
+#else
+            seq1 = getchar();
+            if (seq1 == '[') {
+                seq2 = getchar();
+            }
+#endif
+
+            if (seq1 == '[') {
+                if (seq2 == 'A') {  // Up arrow
+                    if (!command_history_.empty()) {
+                        if (history_index_ == -1) {
+                            // First time pressing up, save current input
+                            original_line = current_line;
+                            history_index_ = command_history_.size() - 1;
+                        } else if (history_index_ > 0) {
+                            history_index_--;
+                        }
+
+                        // Update current line and redraw
+                        current_line = command_history_[history_index_];
+                        cursor_pos = current_line.length();
+
+                        std::cout << "\r" << prompt_;  // Move to start and show prompt
+                        std::cout << current_line;     // Show history command
+                        std::cout.flush();
+                    }
+                }
+                else if (seq2 == 'B') {  // Down arrow
+                    if (history_index_ != -1) {
+                        if (history_index_ < static_cast<int>(command_history_.size()) - 1) {
+                            history_index_++;
+                            current_line = command_history_[history_index_];
+                            cursor_pos = current_line.length();
+
+                            std::cout << "\r" << prompt_;
+                            std::cout << current_line;
+                        } else {
+                            // At end of history, restore original line
+                            history_index_ = -1;
+                            current_line = original_line;
+                            cursor_pos = current_line.length();
+
+                            std::cout << "\r" << prompt_;
+                            std::cout << current_line;
+                        }
+                        std::cout.flush();
+                    }
+                }
+            }
+            // Reset completions when navigating history
+            completion_matches.clear();
+        }
+        else if (ch == 127 || ch == 8) {  // Backspace
+            if (!current_line.empty() && cursor_pos > 0) {
+                // Remove character from string
+                current_line.erase(cursor_pos - 1, 1);
+                cursor_pos--;
+
+                // Clear the entire line and redraw it
+                std::cout << "\r" << prompt_;  // Move to start of line and show prompt
+                std::cout << current_line;     // Show current line
+
+                // If cursor is not at the end, we need to position it correctly
+                if (cursor_pos < current_line.length()) {
+                    // Move cursor back to the correct position
+                    for (size_t i = 0; i < current_line.length() - cursor_pos; ++i) {
+                        std::cout << "\b";
+                    }
+                }
+
+                std::cout.flush();
+            }
+            completion_matches.clear();  // Reset completions on edit
+            history_index_ = -1;  // Reset history navigation on edit
+            original_line = current_line;
+        }
+        else if (ch >= 32 && ch <= 126) {  // Printable character
+            current_line.insert(cursor_pos, 1, (char)ch);
+            cursor_pos++;
+
+            // Redraw from cursor position to end of line
+            std::cout << "\r" << prompt_;  // Move to start of line and show prompt
+            std::cout << current_line;     // Show updated line
+
+            // Position cursor at the correct location
+            if (cursor_pos < current_line.length()) {
+                for (size_t i = 0; i < current_line.length() - cursor_pos; ++i) {
+                    std::cout << "\b";
+                }
+            }
+
+            std::cout.flush();
+            completion_matches.clear();  // Reset completions on edit
+            history_index_ = -1;  // Reset history navigation on edit
+            original_line = current_line;
+        }
+        // Ignore other control characters for now
+    }
+
+#ifdef _WIN32
+    SetConsoleMode(hConsole, mode);
+#endif
+
+    return current_line;
 }
 
 void Shell::handle_signal(int signal) {

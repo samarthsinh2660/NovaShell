@@ -560,33 +560,58 @@ void CommandProcessor::register_builtin_commands() {
             return 1;
         }
 
-        std::cout << "Initialize password vault\n";
-        std::cout << "Choose a strong master password: ";
-#ifdef _WIN32
-        std::string master_pass = get_hidden_password();
-#else
+        const int MAX_ATTEMPTS = 3;
+        int attempts = 0;
+        bool password_valid = false;
         std::string master_pass;
-        std::getline(std::cin, master_pass);
-        master_pass.erase(master_pass.find_last_not_of(" \t\n\r\f\v") + 1);
-#endif
-
-        if (master_pass.length() < 8) {
-            std::cout << "Master password must be at least 8 characters long.\n";
-            return 1;
-        }
-
-        std::cout << "Confirm master password: ";
-#ifdef _WIN32
-        std::string confirm_pass = get_hidden_password();
-#else
         std::string confirm_pass;
-        std::getline(std::cin, confirm_pass);
-        confirm_pass.erase(confirm_pass.find_last_not_of(" \t\n\r\f\v") + 1);
+
+        while (attempts < MAX_ATTEMPTS && !password_valid) {
+            attempts++;
+            std::cout << "Initialize password vault\n";
+            if (attempts > 1) {
+                std::cout << "(Attempt " << attempts << " of " << MAX_ATTEMPTS << ")\n";
+            }
+            std::cout << "Choose a strong master password: ";
+            
+#ifdef _WIN32
+            master_pass = get_hidden_password();
+#else
+            std::getline(std::cin, master_pass);
+            master_pass.erase(master_pass.find_last_not_of(" \t\n\r\f\v") + 1);
 #endif
 
-        if (master_pass != confirm_pass) {
-            std::cout << "Passwords do not match.\n";
-            return 1;
+            if (master_pass.length() < 8) {
+                std::cout << "Master password must be at least 8 characters long.\n";
+                if (attempts < MAX_ATTEMPTS) {
+                    std::cout << "Please try again.\n\n";
+                    continue;
+                } else {
+                    std::cout << "Maximum attempts reached. Vault initialization cancelled.\n";
+                    return 1;
+                }
+            }
+
+            std::cout << "Confirm master password: ";
+#ifdef _WIN32
+            confirm_pass = get_hidden_password();
+#else
+            std::getline(std::cin, confirm_pass);
+            confirm_pass.erase(confirm_pass.find_last_not_of(" \t\n\r\f\v") + 1);
+#endif
+
+            if (master_pass != confirm_pass) {
+                std::cout << "Passwords do not match.\n";
+                if (attempts < MAX_ATTEMPTS) {
+                    std::cout << "Please try again.\n\n";
+                    continue;
+                } else {
+                    std::cout << "Maximum attempts reached. Vault initialization cancelled.\n";
+                    return 1;
+                }
+            }
+
+            password_valid = true;
         }
 
         if (vault::PasswordManager::instance().initialize(master_pass)) {
