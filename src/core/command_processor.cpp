@@ -3,7 +3,10 @@
 #include "auth/authentication.h"
 #include "vfs/virtual_filesystem.h"
 #include "vault/password_manager.h"
+#include "git/git_manager.h"
 #include "network/packet_analyzer.h"
+#include "containers/container_manager.h"
+#include "monitor/system_monitor.h"
 #include "plugins/plugin_manager.h"
 #include "scripting/script_engine.h"
 #include "logging/logger.h"
@@ -11,11 +14,11 @@
 #include "scheduler/task_scheduler.h"
 #include "database/db_manager.h"
 #include "p2p/file_sharing.h"
-#include "ai/command_suggester.h"
+#include "ai/command_suggester.h"  // Temporarily disabled - requires libcurl
 #include "remote/ssh_server.h"
 #include "ui/theme_manager.h"
-#include "voice/voice_commander.h"
-#include "analytics/dashboard.h"
+// #include "voice/voice_commander.h"  // Temporarily disabled
+#include "analytics/dashboard.h"     // Analytics dashboard
 #include "env/environment_manager.h"
 #include <sstream>
 #include <iostream>
@@ -176,17 +179,17 @@ void CommandProcessor::register_builtin_commands() {
             std::cout << "9. 🤖 AI Features       - Intelligent command suggestions\n";
             std::cout << "10. 🌐 Remote Access    - SSH server management\n";
             std::cout << "11. 🎨 Themes           - Visual customization\n";
-            std::cout << "12. 🎤 Voice Commands   - Speech-to-text interface\n";
-            std::cout << "13. 📊 Analytics        - Dashboard and metrics\n";
-            std::cout << "14. 🔧 Environment Mgr  - Development environment switching\n";
-            std::cout << "15. 🛠️ File System      - File and directory operations\n";
-            std::cout << "16. 🏗️ Virtual FS       - Cross-platform file management\n";
-            std::cout << "17. 💾 Database         - SQL database operations\n";
-            std::cout << "18. 📦 P2P Sharing      - LAN file sharing\n";
-            std::cout << "19. 🔌 Plugins          - Extension system\n";
-            std::cout << "20. ⚙️ Scripting        - Script execution\n";
-            std::cout << "21. 📋 Logging          - System logs and audit trails\n";
-            std::cout << "22. 🛠️ Utilities        - General-purpose commands\n\n";
+            // std::cout << "12. 🎤 Voice Commands   - Speech-to-text interface\n";
+            std::cout << "12. 📊 Analytics        - Dashboard and metrics\n";
+            std::cout << "13. 🔧 Environment Mgr  - Development environment switching\n";
+            std::cout << "14. 🛠️ File System      - File and directory operations\n";
+            std::cout << "15. 🏗️ Virtual FS       - Cross-platform file management\n";
+            std::cout << "16. 💾 Database         - SQL database operations\n";
+            std::cout << "17. 📦 P2P Sharing      - LAN file sharing\n";
+            std::cout << "18. 🔌 Plugins          - Extension system\n";
+            std::cout << "19. ⚙️ Scripting        - Script execution\n";
+            std::cout << "20. 📋 Logging          - System logs and audit trails\n";
+            std::cout << "21. 🛠️ Utilities        - General-purpose commands\n\n";
             std::cout << "📖 For detailed guide, see: COMMAND_REFERENCE.md\n\n";
             std::cout << "Usage:\n";
             std::cout << "  help <number>     - Show commands in category\n";
@@ -304,6 +307,8 @@ void CommandProcessor::register_builtin_commands() {
                 {"theme-create <name>", "Create a custom theme"}
             });
         }
+        // Voice commands temporarily disabled
+        /*
         else if (arg == "12" || arg == "voice") {
             show_category_help("🎤 Voice Commands", {
                 {"voice-config [api_key]", "Configure voice recognition"},
@@ -311,55 +316,56 @@ void CommandProcessor::register_builtin_commands() {
                 {"voice-stop", "Stop voice command recognition"}
             });
         }
-        else if (arg == "13" || arg == "analytics" || arg == "dashboard") {
+        */
+        else if (arg == "12" || arg == "analytics" || arg == "dashboard") {
             show_category_help("📊 Analytics", {
                 {"dashboard [name]", "Show analytics dashboard"},
                 {"analytics [metric]", "Show analytics metrics or overview"}
             });
         }
-        else if (arg == "14" || arg == "environment" || arg == "env") {
+        else if (arg == "13" || arg == "environment" || arg == "env") {
             show_category_help("🔧 Environment Manager", {
                 {"env-list", "List available environment profiles"},
                 {"env-create <name> [description]", "Create a new environment profile"},
                 {"env-switch <profile>", "Switch to a different environment profile"}
             });
         }
-        else if (arg == "15" || arg == "filesystem" || arg == "files") {
+        else if (arg == "14" || arg == "filesystem" || arg == "files") {
             show_category_help("🛠️ File System", {
                 {"file-list [directory]", "List files and directories"}
             });
         }
-        else if (arg == "16" || arg == "vfs") {
+        else if (arg == "15" || arg == "vfs") {
             show_category_help("🏗️ Virtual File System", {
                 {"vfs-mount <device> <mount_point> [type]", "Mount a filesystem"}
             });
         }
-        else if (arg == "17" || arg == "database" || arg == "db") {
+        else if (arg == "16" || arg == "database" || arg == "db") {
             show_category_help("💾 Database", {
                 {"db-connect <type> <name> <connection_details>", "Connect to a database"}
             });
         }
-        else if (arg == "18" || arg == "p2p") {
+        else if (arg == "17" || arg == "p2p") {
             show_category_help("📦 P2P Sharing", {
                 {"p2p-share <file> [--public]", "Share a file via P2P on the local network"}
             });
         }
-        else if (arg == "19" || arg == "plugin" || arg == "plugins") {
+        else if (arg == "18" || arg == "plugin" || arg == "plugins") {
             show_category_help("🔌 Plugins", {
                 {"plugin-list", "List loaded plugins and their capabilities"}
             });
         }
-        else if (arg == "20" || arg == "scripting" || arg == "script") {
+        else if (arg == "19" || arg == "scripting" || arg == "script") {
             show_category_help("⚙️ Scripting", {
                 {"script-run <script_file>", "Execute a script file"}
             });
         }
-        else if (arg == "21" || arg == "logging" || arg == "logs") {
+        else if (arg == "20" || arg == "logging" || arg == "logs") {
             show_category_help("📋 Logging", {
                 {"log-show [count]", "Show recent system logs and audit entries"}
             });
         }
-        else if (arg == "22" || arg == "utilities" || arg == "util") {
+        else if (arg == "21" || arg == "utilities" || arg == "util") {
             show_category_help("🛠️ Utilities", {
                 {"help [category|command]", "Show help for categories or specific commands"},
                 {"version", "Show NovaShell version information"},
@@ -543,7 +549,7 @@ void CommandProcessor::register_builtin_commands() {
     vault_init_cmd.name = "vault-init";
     vault_init_cmd.description = "Initialize password vault with master password";
     vault_init_cmd.usage = "vault-init";
-    vault_init_cmd.handler = [](const CommandContext& ctx) -> int {
+    vault_init_cmd.handler = []([[maybe_unused]] const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
             std::cout << "You must be logged in to use the vault.\n";
             return 1;
@@ -598,7 +604,7 @@ void CommandProcessor::register_builtin_commands() {
     vault_unlock_cmd.name = "vault-unlock";
     vault_unlock_cmd.description = "Unlock password vault";
     vault_unlock_cmd.usage = "vault-unlock";
-    vault_unlock_cmd.handler = [](const CommandContext& ctx) -> int {
+    vault_unlock_cmd.handler = []([[maybe_unused]] const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
             std::cout << "You must be logged in to use the vault.\n";
             return 1;
@@ -638,7 +644,7 @@ void CommandProcessor::register_builtin_commands() {
     vault_lock_cmd.name = "vault-lock";
     vault_lock_cmd.description = "Lock password vault";
     vault_lock_cmd.usage = "vault-lock";
-    vault_lock_cmd.handler = [](const CommandContext& ctx) -> int {
+    vault_lock_cmd.handler = []([[maybe_unused]] const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
             std::cout << "You must be logged in to use the vault.\n";
             return 1;
@@ -655,7 +661,7 @@ void CommandProcessor::register_builtin_commands() {
     vault_add_cmd.name = "vault-add";
     vault_add_cmd.description = "Add a new password entry";
     vault_add_cmd.usage = "vault-add";
-    vault_add_cmd.handler = [](const CommandContext& ctx) -> int {
+    vault_add_cmd.handler = []([[maybe_unused]] const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
             std::cout << "You must be logged in to use the vault.\n";
             return 1;
@@ -711,7 +717,7 @@ void CommandProcessor::register_builtin_commands() {
     vault_list_cmd.name = "vault-list";
     vault_list_cmd.description = "List all password entries";
     vault_list_cmd.usage = "vault-list";
-    vault_list_cmd.handler = [](const CommandContext& ctx) -> int {
+    vault_list_cmd.handler = []([[maybe_unused]] const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
             std::cout << "You must be logged in to use the vault.\n";
             return 1;
@@ -878,7 +884,7 @@ void CommandProcessor::register_builtin_commands() {
     git_status_cmd.name = "git-status";
     git_status_cmd.description = "Show git repository status";
     git_status_cmd.usage = "git-status";
-    git_status_cmd.handler = [](const CommandContext& ctx) -> int {
+    git_status_cmd.handler = []([[maybe_unused]] const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
             std::cout << "You must be logged in to use git commands.\n";
             return 1;
@@ -2672,7 +2678,8 @@ void CommandProcessor::register_builtin_commands() {
     };
     registry_->register_command(p2p_share_cmd);
 
-    // AI-powered suggestions command
+    // AI commands - Temporarily disabled (requires libcurl)
+    /*
     CommandInfo ai_suggest_cmd;
     ai_suggest_cmd.name = "ai-suggest";
     ai_suggest_cmd.description = "Get AI-powered command suggestions";
@@ -2752,6 +2759,7 @@ void CommandProcessor::register_builtin_commands() {
         }
     };
     registry_->register_command(ai_init_cmd);
+    */
 
     // SSH Remote Shell Access commands
     CommandInfo ssh_start_cmd;
@@ -2913,7 +2921,8 @@ void CommandProcessor::register_builtin_commands() {
     };
     registry_->register_command(theme_create_cmd);
 
-    // Voice Commands
+    // Voice Commands - Temporarily disabled (modules not implemented)
+    /*
     CommandInfo voice_start_cmd;
     voice_start_cmd.name = "voice-start";
     voice_start_cmd.description = "Start voice command recognition";
@@ -2991,6 +3000,7 @@ void CommandProcessor::register_builtin_commands() {
         }
     };
     registry_->register_command(voice_config_cmd);
+    */
 
     // Analytics Dashboard commands
     CommandInfo dashboard_cmd;
@@ -3023,7 +3033,7 @@ void CommandProcessor::register_builtin_commands() {
         for (const auto& widget : dashboard.widgets) {
             std::cout << "\n📈 " << widget.title << "\n";
             std::cout << std::string(widget.title.length() + 4, '-') << "\n";
-            
+
             // Show sample data
             if (!widget.data.data.empty()) {
                 for (size_t i = 0; i < std::min(widget.data.data.size(), size_t(5)); ++i) {
@@ -3207,7 +3217,7 @@ void CommandProcessor::register_builtin_commands() {
 }
 
 // Helper function for showing category help
-void show_category_help(const std::string& category_name, const std::vector<std::pair<std::string, std::string>>& commands) {
+void CommandProcessor::show_category_help(const std::string& category_name, const std::vector<std::pair<std::string, std::string>>& commands) {
     std::cout << category_name << " Commands:\n";
     std::cout << std::string(category_name.length() + 10, '=') << "\n\n";
     
@@ -3219,3 +3229,6 @@ void show_category_help(const std::string& category_name, const std::vector<std:
     std::cout << "Type 'help <command>' for detailed usage examples.\n";
     std::cout << "📖 See COMMAND_REFERENCE.md for comprehensive examples.\n";
 }
+
+} // namespace core
+} // namespace customos

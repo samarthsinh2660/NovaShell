@@ -160,18 +160,18 @@ std::string ThemeManager::colorize_text(const std::string& text, const Color& co
 }
 
 // Stubs for other methods
-bool ThemeManager::save_theme(const Theme& theme) { return false; }
-bool ThemeManager::delete_theme(const std::string& name) { return false; }
-bool ThemeManager::create_custom_theme(const std::string& name, const ColorScheme& colors) { return false; }
-bool ThemeManager::edit_theme(const std::string& name, const ColorScheme& colors) { return false; }
-bool ThemeManager::duplicate_theme(const std::string& source, const std::string& new_name) { return false; }
-Color ThemeManager::parse_color(const std::string& color_str) { return Color(); }
-std::string ThemeManager::format_prompt(const std::string& user, const std::string& host, const std::string& pwd) { return ""; }
-bool ThemeManager::import_theme_from_file(const std::string& filepath) { return false; }
-bool ThemeManager::export_theme_to_file(const std::string& theme_name, const std::string& filepath) { return false; }
-bool ThemeManager::import_from_vscode(const std::string& filepath) { return false; }
-bool ThemeManager::import_from_terminal_app(const std::string& filepath) { return false; }
-void ThemeManager::preview_theme(const std::string& theme_name) {}
+bool ThemeManager::save_theme([[maybe_unused]] const Theme& theme) { return false; }
+bool ThemeManager::delete_theme([[maybe_unused]] const std::string& name) { return false; }
+bool ThemeManager::create_custom_theme([[maybe_unused]] const std::string& name, [[maybe_unused]] const ColorScheme& colors) { return false; }
+bool ThemeManager::edit_theme([[maybe_unused]] const std::string& name, [[maybe_unused]] const ColorScheme& colors) { return false; }
+bool ThemeManager::duplicate_theme([[maybe_unused]] const std::string& source, [[maybe_unused]] const std::string& new_name) { return false; }
+Color ThemeManager::parse_color([[maybe_unused]] const std::string& color_str) { return Color(); }
+std::string ThemeManager::format_prompt([[maybe_unused]] const std::string& user, [[maybe_unused]] const std::string& host, [[maybe_unused]] const std::string& pwd) { return ""; }
+bool ThemeManager::import_theme_from_file([[maybe_unused]] const std::string& filepath) { return false; }
+bool ThemeManager::export_theme_to_file([[maybe_unused]] const std::string& theme_name, [[maybe_unused]] const std::string& filepath) { return false; }
+bool ThemeManager::import_from_vscode([[maybe_unused]] const std::string& filepath) { return false; }
+bool ThemeManager::import_from_terminal_app([[maybe_unused]] const std::string& filepath) { return false; }
+void ThemeManager::preview_theme([[maybe_unused]] const std::string& theme_name) {}
 void ThemeManager::reset_colors() {}
 bool ThemeManager::toggle_dark_light() { return false; }
 

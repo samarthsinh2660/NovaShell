@@ -196,6 +196,14 @@ set(AI_SOURCES
     # src/ai/command_suggester.cpp
 )
 
+set(UI_SOURCES
+    src/ui/theme_manager.cpp
+)
+
+set(ANALYTICS_SOURCES
+    src/analytics/dashboard.cpp
+)
+
 set(REMOTE_SOURCES
     src/remote/ssh_server.cpp
 )
@@ -246,6 +254,8 @@ add_executable(customos-shell
     ${LOGGING_SOURCES}
     ${UTILS_SOURCES}
     ${AI_SOURCES}
+    ${UI_SOURCES}
+    ${ANALYTICS_SOURCES}
     ${REMOTE_SOURCES}
     ${CONTAINERS_SOURCES}
     ${NOTES_SOURCES}

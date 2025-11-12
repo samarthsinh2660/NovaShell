@@ -43,6 +43,9 @@ private:
     CommandResult execute_parsed_command(const ParsedCommand& cmd);
     void register_builtin_commands();
 
+    // Helper function for category help display
+    static void show_category_help(const std::string& category_name, const std::vector<std::pair<std::string, std::string>>& commands);
+
     std::unique_ptr<CommandRegistry> registry_;
 };
 

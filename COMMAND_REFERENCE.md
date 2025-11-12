@@ -1,4 +1,4 @@
-# NovaShell Command Reference Guide
+nce Guide
 
 A comprehensive guide to all NovaShell commands, organized by category for easy navigation.
 
@@ -338,6 +338,81 @@ Current user session active
 
 ---
 
+## 📊 Analytics
+
+**Purpose**: Real-time dashboards and metrics for system monitoring and usage analytics.
+
+### Commands:
+
+#### `dashboard [name]`
+**Description**: Display analytics dashboard with widgets and charts.
+**Usage**: `dashboard` or `dashboard commands`
+**Examples**:
+```bash
+novashell> dashboard
+📊 system Dashboard
+====================
+
+📈 CPU Usage (%)
+─────────────────
+
+Recent data:
+  Mon Nov 11 14:30:00 2025  Value: 45.2 %
+  Mon Nov 11 14:25:00 2025  Value: 38.7 %
+  Mon Nov 11 14:20:00 2025  Value: 52.1 %
+
+📈 Memory Usage (%)
+───────────────────
+
+Recent data:
+  Mon Nov 11 14:30:00 2025  Value: 67.8 %
+  Mon Nov 11 14:25:00 2025  Value: 63.2 %
+  Mon Nov 11 14:20:00 2025  Value: 71.5 %
+
+novashell> dashboard commands
+📊 commands Dashboard
+======================
+
+📈 Command Usage
+────────────────
+
+Recent data:
+  Mon Nov 11 14:30:00 2025  Value: 120 count
+  Mon Nov 11 14:25:00 2025  Value: 98 count
+  Mon Nov 11 14:20:00 2025  Value: 145 count
+```
+
+#### `analytics [metric]`
+**Description**: Show analytics metrics or overview of command usage.
+**Usage**: `analytics` or `analytics cpu` or `analytics memory`
+**Examples**:
+```bash
+novashell> analytics
+📊 Command Analytics (Top 5):
+=============================
+  help: 145 times
+  git-status: 89 times
+  vault-list: 76 times
+  monitor-cpu: 65 times
+  note-list: 52 times
+
+novashell> analytics cpu
+📊 CPU Usage History (Last Hour):
+==================================
+  Mon Nov 11 14:30:00 2025  CPU: 45.2%
+  Mon Nov 11 14:25:00 2025  CPU: 38.7%
+  Mon Nov 11 14:20:00 2025  CPU: 52.1%
+
+novashell> analytics memory
+📊 Memory Usage History (Last Hour):
+=====================================
+  Mon Nov 11 14:30:00 2025  Memory: 67.8%
+  Mon Nov 11 14:25:00 2025  Memory: 63.2%
+  Mon Nov 11 14:20:00 2025  Memory: 71.5%
+```
+
+---
+
 ## 🎯 Quick Reference
 
 ### Most Used Commands:
@@ -360,7 +435,8 @@ Current user session active
 - `task-schedule` - Automate repetitive tasks
 - `p2p-share` - Share files locally
 - `ssh-start` - Enable remote access
-- `analytics` - View system insights
+- `dashboard` - View real-time analytics
+- `analytics` - Monitor system metrics
 
 ---
 
