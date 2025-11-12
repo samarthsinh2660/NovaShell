@@ -261,45 +261,37 @@ brew install cmake openssl libpcap
 
 ## 🚀 Installation
 
-### Quick Install (Recommended) ⚡
-
-**Linux / macOS:**
-```bash
-curl -fsSL https://novashell.dev/install.sh | bash
-```
-
-**Windows:**
+### Quick Setup (Windows - Recommended)
 ```powershell
-iwr -useb https://novashell.dev/install.ps1 | iex
+# Automated setup - installs all dependencies and builds NovaShell
+.\setup-dependencies.ps1
+.\build.ps1
+.\run-novashell.ps1
 ```
 
-That's it! NovaShell is now installed and ready to use.
+### Detailed Installation Guide
+For comprehensive installation instructions including:
+- Manual setup steps
+- Platform-specific requirements  
+- Dependency installation
+- Troubleshooting
+- Configuration options
 
----
+📖 **See [SETUP.md](SETUP.md)** for complete installation guide.
 
 ### Manual Installation
-
-### 1. Clone the Repository
 ```bash
+# Clone repository
 git clone https://github.com/yourusername/novashell.git
 cd novashell
-```
 
-### 2. Build the Project
-```bash
-mkdir build
-cd build
+# Build
+mkdir build && cd build
 cmake ..
 cmake --build . --config Release
-```
 
-### 3. Install (Optional)
-```bash
-# Linux/macOS
-sudo cmake --install .
-
-# Windows (as Administrator)
-cmake --install .
+# Run
+./bin/customos-shell
 ```
 
 ## 🎯 Quick Start
