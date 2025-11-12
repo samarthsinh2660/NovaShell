@@ -9,9 +9,19 @@
 #include "logging/logger.h"
 #include "notes/snippet_manager.h"
 #include "scheduler/task_scheduler.h"
+#include "database/db_manager.h"
+#include "p2p/file_sharing.h"
+#include "ai/command_suggester.h"
+#include "remote/ssh_server.h"
+#include "ui/theme_manager.h"
+#include "voice/voice_commander.h"
+#include "analytics/dashboard.h"
+#include "env/environment_manager.h"
 #include <sstream>
 #include <iostream>
 #include <algorithm>
+#include <filesystem>
+#include <iomanip>
 #ifdef _WIN32
 #include <conio.h> // For Windows password input
 #endif
@@ -2099,9 +2109,32 @@ void CommandProcessor::register_builtin_commands() {
         }
 
         (void)ctx; // Suppress unused parameter warning
-        // TODO: Implement plugin listing when plugin manager is fully implemented
-        std::cout << "Plugin system not yet fully implemented.\n";
-        std::cout << "Available plugins: None loaded\n";
+        auto plugins = plugins::PluginManager::instance().list_plugins();
+        if (plugins.empty()) {
+            std::cout << "No plugins loaded.\n";
+            return 0;
+        }
+
+        std::cout << "Loaded Plugins:\n";
+        std::cout << "================\n";
+        for (size_t i = 0; i < plugins.size(); ++i) {
+            const auto& plugin = plugins[i];
+            std::cout << i + 1 << ". " << plugin.name << " v" << plugin.version << "\n";
+            std::cout << "   " << plugin.description << "\n";
+            std::cout << "   Author: " << plugin.author << "\n";
+            std::cout << "   Commands: ";
+            for (size_t j = 0; j < plugin.commands.size(); ++j) {
+                std::cout << plugin.commands[j];
+                if (j < plugin.commands.size() - 1) std::cout << ", ";
+            }
+            std::cout << "\n";
+            if (plugin.loaded) {
+                std::cout << "   Status: Loaded\n";
+            } else {
+                std::cout << "   Status: Unloaded\n";
+            }
+            std::cout << "\n";
+        }
         return 0;
     };
     registry_->register_command(plugin_list_cmd);
@@ -2122,10 +2155,24 @@ void CommandProcessor::register_builtin_commands() {
             return 1;
         }
 
-        // TODO: Implement script execution
-        std::cout << "Scripting engine not yet implemented.\n";
-        std::cout << "Cannot execute: " << ctx.args[0] << "\n";
-        return 1;
+        // Set script context
+        scripting::ScriptContext script_ctx;
+        script_ctx.current_user = auth::Authentication::instance().get_current_user();
+        script_ctx.working_directory = "/"; // Could be improved to use actual working directory
+        scripting::ScriptEngine::instance().set_context(script_ctx);
+
+        // Execute the script
+        auto result = scripting::ScriptEngine::instance().execute_file(ctx.args[0]);
+        
+        if (result.success) {
+            if (!result.output.empty()) {
+                std::cout << result.output;
+            }
+            return result.exit_code;
+        } else {
+            std::cout << "Script execution failed: " << result.error << "\n";
+            return 1;
+        }
     };
     registry_->register_command(script_run_cmd);
 
@@ -2140,18 +2187,70 @@ void CommandProcessor::register_builtin_commands() {
             return 1;
         }
 
-        int count = 10;
+        size_t count = 10;
         if (!ctx.args.empty()) {
             try {
-                count = std::stoi(ctx.args[0]);
+                count = std::stoul(ctx.args[0]);
             } catch (...) {
                 count = 10;
             }
         }
 
-        // TODO: Implement log retrieval when logging system is fully implemented
-        std::cout << "Logging system not yet fully implemented.\n";
-        std::cout << "Recent logs would be shown here.\n";
+        auto logs = logging::Logger::instance().get_logs(count);
+        auto audit = logging::Logger::instance().get_audit_trail(count);
+
+        if (logs.empty() && audit.empty()) {
+            std::cout << "No log entries found.\n";
+            return 0;
+        }
+
+        std::cout << "Recent Log Entries:\n";
+        std::cout << "===================\n";
+
+        // Show regular logs
+        if (!logs.empty()) {
+            std::cout << "\nSystem Logs:\n";
+            for (const auto& log : logs) {
+                std::string level_str;
+                switch (log.level) {
+                    case logging::LogLevel::TRACE: level_str = "TRACE"; break;
+                    case logging::LogLevel::DEBUG: level_str = "DEBUG"; break;
+                    case logging::LogLevel::INFO: level_str = "INFO"; break;
+                    case logging::LogLevel::WARNING: level_str = "WARN"; break;
+                    case logging::LogLevel::ERROR: level_str = "ERROR"; break;
+                    case logging::LogLevel::CRITICAL: level_str = "CRIT"; break;
+                }
+                std::cout << "[" << level_str << "] " << std::ctime(&log.timestamp)
+                         << "  " << log.source << ": " << log.message << "\n";
+            }
+        }
+
+        // Show audit logs
+        if (!audit.empty()) {
+            std::cout << "\nAudit Trail:\n";
+            for (const auto& entry : audit) {
+                std::string event_str;
+                switch (entry.event_type) {
+                    case logging::AuditEventType::LOGIN: event_str = "LOGIN"; break;
+                    case logging::AuditEventType::LOGOUT: event_str = "LOGOUT"; break;
+                    case logging::AuditEventType::COMMAND_EXECUTED: event_str = "COMMAND"; break;
+                    case logging::AuditEventType::FILE_ACCESSED: event_str = "FILE_ACCESS"; break;
+                    case logging::AuditEventType::PERMISSION_CHANGED: event_str = "PERMISSION"; break;
+                    case logging::AuditEventType::USER_CREATED: event_str = "USER_CREATE"; break;
+                    case logging::AuditEventType::USER_DELETED: event_str = "USER_DELETE"; break;
+                    case logging::AuditEventType::VAULT_ACCESSED: event_str = "VAULT_ACCESS"; break;
+                    case logging::AuditEventType::NETWORK_ACTIVITY: event_str = "NETWORK"; break;
+                    case logging::AuditEventType::PLUGIN_LOADED: event_str = "PLUGIN_LOAD"; break;
+                    case logging::AuditEventType::SYSTEM_CONFIG_CHANGED: event_str = "CONFIG_CHANGE"; break;
+                }
+                std::cout << "[" << event_str << "] " << std::ctime(&entry.timestamp)
+                         << "  User: " << entry.user << " - " << entry.action;
+                if (!entry.details.empty()) {
+                    std::cout << " (" << entry.details << ")";
+                }
+                std::cout << " [" << (entry.success ? "SUCCESS" : "FAILED") << "]\n";
+            }
+        }
         return 0;
     };
     registry_->register_command(log_show_cmd);
@@ -2169,10 +2268,42 @@ void CommandProcessor::register_builtin_commands() {
 
         std::string path = ctx.args.empty() ? "." : ctx.args[0];
 
-        // TODO: Implement file listing using VFS or standard filesystem
-        std::cout << "File utilities not yet fully implemented.\n";
-        std::cout << "Would list files in: " << path << "\n";
-        return 0;
+        try {
+            auto files = vfs::VirtualFileSystem::instance().list(path);
+            if (files.empty()) {
+                std::cout << "No files found in " << path << "\n";
+                return 0;
+            }
+
+            std::cout << "Contents of " << path << ":\n";
+            std::cout << "========================================\n";
+            for (const auto& file : files) {
+                std::string type = file.is_directory ? "[DIR]" : "[FILE]";
+                std::string size_str;
+                if (file.is_directory) {
+                    size_str = "<DIR>";
+                } else {
+                    // Format size
+                    if (file.size < 1024) {
+                        size_str = std::to_string(file.size) + " B";
+                    } else if (file.size < 1024 * 1024) {
+                        size_str = std::to_string(file.size / 1024) + " KB";
+                    } else if (file.size < 1024 * 1024 * 1024) {
+                        size_str = std::to_string(file.size / (1024 * 1024)) + " MB";
+                    } else {
+                        size_str = std::to_string(file.size / (1024 * 1024 * 1024)) + " GB";
+                    }
+                }
+
+                std::cout << type << " " << std::left << std::setw(30) << file.name 
+                         << std::right << std::setw(10) << size_str << "  "
+                         << std::ctime(&file.modified);
+            }
+            return 0;
+        } catch (const std::exception& e) {
+            std::cout << "Error listing directory: " << e.what() << "\n";
+            return 1;
+        }
     };
     registry_->register_command(file_list_cmd);
 
@@ -2180,7 +2311,7 @@ void CommandProcessor::register_builtin_commands() {
     CommandInfo vfs_mount_cmd;
     vfs_mount_cmd.name = "vfs-mount";
     vfs_mount_cmd.description = "Mount a filesystem";
-    vfs_mount_cmd.usage = "vfs-mount <device> <mount_point>";
+    vfs_mount_cmd.usage = "vfs-mount <device> <mount_point> [type]";
     vfs_mount_cmd.handler = [](const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
             std::cout << "You must be logged in to use VFS.\n";
@@ -2188,14 +2319,35 @@ void CommandProcessor::register_builtin_commands() {
         }
 
         if (ctx.args.size() < 2) {
-            std::cout << "Usage: vfs-mount <device> <mount_point>\n";
+            std::cout << "Usage: vfs-mount <device> <mount_point> [type]\n";
+            std::cout << "Types: fat32, ntfs, ext4\n";
             return 1;
         }
 
-        // TODO: Implement VFS mounting
-        std::cout << "Virtual File System not yet fully implemented.\n";
-        std::cout << "Would mount " << ctx.args[0] << " at " << ctx.args[1] << "\n";
-        return 0;
+        std::string device = ctx.args[0];
+        std::string mount_point = ctx.args[1];
+        vfs::FSType type = vfs::FSType::UNKNOWN;
+
+        if (ctx.args.size() > 2) {
+            std::string type_str = ctx.args[2];
+            if (type_str == "fat32") type = vfs::FSType::FAT32;
+            else if (type_str == "ntfs") type = vfs::FSType::NTFS;
+            else if (type_str == "ext4") type = vfs::FSType::EXT4;
+            else {
+                std::cout << "Unknown filesystem type: " << type_str << "\n";
+                std::cout << "Supported types: fat32, ntfs, ext4\n";
+                return 1;
+            }
+        }
+
+        bool success = vfs::VirtualFileSystem::instance().mount(device, mount_point, type);
+        if (success) {
+            std::cout << "Filesystem mounted successfully at " << mount_point << "\n";
+            return 0;
+        } else {
+            std::cout << "Failed to mount filesystem.\n";
+            return 1;
+        }
     };
     registry_->register_command(vfs_mount_cmd);
 
@@ -2203,22 +2355,62 @@ void CommandProcessor::register_builtin_commands() {
     CommandInfo db_connect_cmd;
     db_connect_cmd.name = "db-connect";
     db_connect_cmd.description = "Connect to database";
-    db_connect_cmd.usage = "db-connect <connection_string>";
+    db_connect_cmd.usage = "db-connect <type> <name> <connection_details>";
     db_connect_cmd.handler = [](const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
             std::cout << "You must be logged in to use database.\n";
             return 1;
         }
 
-        if (ctx.args.empty()) {
-            std::cout << "Usage: db-connect <connection_string>\n";
+        if (ctx.args.size() < 3) {
+            std::cout << "Usage: db-connect <type> <name> <connection_details>\n";
+            std::cout << "Types: mysql, postgres, sqlite\n";
+            std::cout << "Examples:\n";
+            std::cout << "  db-connect mysql mydb localhost 3306 testdb user\n";
+            std::cout << "  db-connect sqlite mydb /path/to/database.db\n";
             return 1;
         }
 
-        // TODO: Implement database connections
-        std::cout << "Database connections not yet implemented.\n";
-        std::cout << "Would connect to: " << ctx.args[0] << "\n";
-        return 0;
+        std::string type = ctx.args[0];
+        std::string name = ctx.args[1];
+        database::DBConfig config;
+
+        bool success = false;
+        if (type == "mysql" && ctx.args.size() >= 6) {
+            config.type = database::DBType::MYSQL;
+            config.host = ctx.args[2];
+            config.port = std::stoi(ctx.args[3]);
+            config.database = ctx.args[4];
+            config.username = ctx.args[5];
+            if (ctx.args.size() > 6) config.password = ctx.args[6];
+            success = database::DBManager::instance().connect_mysql(name, config.host, config.port,
+                                                                  config.database, config.username, config.password);
+        } else if (type == "postgres" && ctx.args.size() >= 6) {
+            config.type = database::DBType::POSTGRESQL;
+            config.host = ctx.args[2];
+            config.port = std::stoi(ctx.args[3]);
+            config.database = ctx.args[4];
+            config.username = ctx.args[5];
+            if (ctx.args.size() > 6) config.password = ctx.args[6];
+            success = database::DBManager::instance().connect_postgres(name, config.host, config.port,
+                                                                     config.database, config.username, config.password);
+        } else if (type == "sqlite" && ctx.args.size() >= 3) {
+            config.type = database::DBType::SQLITE;
+            std::string filepath = ctx.args[2];
+            success = database::DBManager::instance().connect_sqlite(name, filepath);
+        } else {
+            std::cout << "Invalid connection parameters.\n";
+            return 1;
+        }
+
+        if (success) {
+            std::cout << "Connected to " << type << " database '" << name << "' successfully.\n";
+            database::DBManager::instance().switch_connection(name);
+            return 0;
+        } else {
+            std::cout << "Failed to connect to database.\n";
+            return 1;
+        }
     };
     registry_->register_command(db_connect_cmd);
 
@@ -2226,7 +2418,7 @@ void CommandProcessor::register_builtin_commands() {
     CommandInfo p2p_share_cmd;
     p2p_share_cmd.name = "p2p-share";
     p2p_share_cmd.description = "Share a file via P2P";
-    p2p_share_cmd.usage = "p2p-share <file>";
+    p2p_share_cmd.usage = "p2p-share <file> [--public]";
     p2p_share_cmd.handler = [](const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
             std::cout << "You must be logged in to use P2P sharing.\n";
@@ -2234,17 +2426,570 @@ void CommandProcessor::register_builtin_commands() {
         }
 
         if (ctx.args.empty()) {
-            std::cout << "Usage: p2p-share <file>\n";
+            std::cout << "Usage: p2p-share <file> [--public]\n";
             return 1;
         }
 
-        // TODO: Implement P2P file sharing
-        std::cout << "P2P file sharing not yet implemented.\n";
-        std::cout << "Would share file: " << ctx.args[0] << "\n";
-        return 0;
+        std::string filepath = ctx.args[0];
+        bool is_public = false;
+
+        if (ctx.args.size() > 1 && ctx.args[1] == "--public") {
+            is_public = true;
+        }
+
+        // Ensure P2P server is running
+        if (!p2p::FileSharing::instance().is_running()) {
+            std::cout << "Starting P2P server...\n";
+            if (!p2p::FileSharing::instance().start_server()) {
+                std::cout << "Failed to start P2P server.\n";
+                return 1;
+            }
+        }
+
+        std::string file_id = p2p::FileSharing::instance().share_file(filepath, is_public);
+        if (!file_id.empty()) {
+            std::cout << "File shared successfully!\n";
+            std::cout << "File ID: " << file_id << "\n";
+            std::cout << "Share type: " << (is_public ? "Public" : "Private") << "\n";
+            std::cout << "Other users on the network can now request this file.\n";
+            return 0;
+        } else {
+            std::cout << "Failed to share file.\n";
+            return 1;
+        }
     };
     registry_->register_command(p2p_share_cmd);
-}
 
-} // namespace core
-} // namespace customos
+    // AI-powered suggestions command
+    CommandInfo ai_suggest_cmd;
+    ai_suggest_cmd.name = "ai-suggest";
+    ai_suggest_cmd.description = "Get AI-powered command suggestions";
+    ai_suggest_cmd.usage = "ai-suggest [context]";
+    ai_suggest_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI suggestions.\n";
+            return 1;
+        }
+
+        if (!ai::CommandSuggester::instance().is_initialized()) {
+            std::cout << "AI suggestions not initialized. Use 'ai-init <api_key>' first.\n";
+            return 1;
+        }
+
+        ai::SuggestionContext context;
+        context.current_user = auth::Authentication::instance().get_current_user();
+        context.current_directory = "/"; // Could be improved to get actual working directory
+        context.partial_input = ctx.args.empty() ? "" : ctx.args[0];
+
+        // Get suggestions
+        auto suggestions = ai::CommandSuggester::instance().suggest(context);
+
+        if (suggestions.empty()) {
+            std::cout << "No AI suggestions available.\n";
+            return 0;
+        }
+
+        std::cout << "🤖 AI Command Suggestions:\n";
+        std::cout << "=========================\n";
+        for (size_t i = 0; i < std::min(suggestions.size(), size_t(5)); ++i) {
+            const auto& suggestion = suggestions[i];
+            std::cout << i + 1 << ". " << suggestion.command << "\n";
+            std::cout << "   " << suggestion.description << "\n";
+            std::cout << "   Confidence: " << (suggestion.confidence * 100) << "%\n\n";
+        }
+
+        // Also show next command predictions
+        auto next_commands = ai::CommandSuggester::instance().predict_next_command();
+        if (!next_commands.empty()) {
+            std::cout << "🎯 Predicted Next Commands:\n";
+            std::cout << "===========================\n";
+            for (size_t i = 0; i < std::min(next_commands.size(), size_t(3)); ++i) {
+                std::cout << i + 1 << ". " << next_commands[i].command << "\n";
+            }
+        }
+        return 0;
+    };
+    registry_->register_command(ai_suggest_cmd);
+
+    // AI initialization command
+    CommandInfo ai_init_cmd;
+    ai_init_cmd.name = "ai-init";
+    ai_init_cmd.description = "Initialize AI suggestions with API key";
+    ai_init_cmd.usage = "ai-init <gemini_api_key>";
+    ai_init_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to initialize AI.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: ai-init <gemini_api_key>\n";
+            std::cout << "Get your API key from: https://makersuite.google.com/app/apikey\n";
+            return 1;
+        }
+
+        if (ai::CommandSuggester::instance().initialize(ctx.args[0])) {
+            std::cout << "AI suggestions initialized successfully!\n";
+            std::cout << "You can now use 'ai-suggest' to get intelligent command suggestions.\n";
+            ai::CommandSuggester::instance().enable(true);
+            return 0;
+        } else {
+            std::cout << "Failed to initialize AI suggestions.\n";
+            std::cout << "Please check your API key and internet connection.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(ai_init_cmd);
+
+    // SSH Remote Shell Access commands
+    CommandInfo ssh_start_cmd;
+    ssh_start_cmd.name = "ssh-start";
+    ssh_start_cmd.description = "Start SSH server for remote access";
+    ssh_start_cmd.usage = "ssh-start [port]";
+    ssh_start_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to start SSH server.\n";
+            return 1;
+        }
+
+        uint16_t port = 2222;
+        if (!ctx.args.empty()) {
+            try {
+                port = static_cast<uint16_t>(std::stoi(ctx.args[0]));
+            } catch (...) {
+                std::cout << "Invalid port number.\n";
+                return 1;
+            }
+        }
+
+        if (remote::SSHServer::instance().start(port)) {
+            std::cout << "SSH server started successfully on port " << port << "!\n";
+            std::cout << "Remote users can connect with: ssh user@your-ip:" << port << "\n";
+            std::cout << "Use 'ssh-stop' to stop the server.\n";
+            return 0;
+        } else {
+            std::cout << "Failed to start SSH server.\n";
+            std::cout << "Make sure port " << port << " is not in use.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(ssh_start_cmd);
+
+    CommandInfo ssh_stop_cmd;
+    ssh_stop_cmd.name = "ssh-stop";
+    ssh_stop_cmd.description = "Stop SSH server";
+    ssh_stop_cmd.usage = "ssh-stop";
+    ssh_stop_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to stop SSH server.\n";
+            return 1;
+        }
+
+        (void)ctx; // Suppress unused parameter warning
+        remote::SSHServer::instance().stop();
+        std::cout << "SSH server stopped.\n";
+        return 0;
+    };
+    registry_->register_command(ssh_stop_cmd);
+
+    CommandInfo ssh_connections_cmd;
+    ssh_connections_cmd.name = "ssh-connections";
+    ssh_connections_cmd.description = "Show active SSH connections";
+    ssh_connections_cmd.usage = "ssh-connections";
+    ssh_connections_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to view SSH connections.\n";
+            return 1;
+        }
+
+        (void)ctx; // Suppress unused parameter warning
+        auto connections = remote::SSHServer::instance().get_active_connections();
+        if (connections.empty()) {
+            std::cout << "No active SSH connections.\n";
+            return 0;
+        }
+
+        std::cout << "Active SSH Connections:\n";
+        std::cout << "======================\n";
+        for (const auto& conn : connections) {
+            std::cout << "Client: " << conn.client_ip << ":" << conn.client_port << "\n";
+            std::cout << "User: " << conn.username << "\n";
+            std::cout << "Connected: " << std::ctime(&conn.connected_at);
+            std::cout << "Authenticated: " << (conn.authenticated ? "Yes" : "No") << "\n\n";
+        }
+        return 0;
+    };
+    registry_->register_command(ssh_connections_cmd);
+
+    // Theme Management commands
+    CommandInfo theme_list_cmd;
+    theme_list_cmd.name = "theme-list";
+    theme_list_cmd.description = "List available themes";
+    theme_list_cmd.usage = "theme-list";
+    theme_list_cmd.handler = [](const CommandContext& ctx) -> int {
+        (void)ctx; // Suppress unused parameter warning
+        
+        auto themes = novashell::ui::ThemeManager::instance().list_themes();
+        if (themes.empty()) {
+            std::cout << "No themes available.\n";
+            return 1;
+        }
+
+        std::cout << "Available Themes:\n";
+        std::cout << "=================\n";
+        for (size_t i = 0; i < themes.size(); ++i) {
+            std::cout << i + 1 << ". " << themes[i] << "\n";
+        }
+
+        auto current = novashell::ui::ThemeManager::instance().get_current_theme();
+        std::cout << "\nCurrent theme: " << current.name << "\n";
+        return 0;
+    };
+    registry_->register_command(theme_list_cmd);
+
+    CommandInfo theme_set_cmd;
+    theme_set_cmd.name = "theme-set";
+    theme_set_cmd.description = "Set active theme";
+    theme_set_cmd.usage = "theme-set <theme_name>";
+    theme_set_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (ctx.args.empty()) {
+            std::cout << "Usage: theme-set <theme_name>\n";
+            std::cout << "Use 'theme-list' to see available themes.\n";
+            return 1;
+        }
+
+        if (novashell::ui::ThemeManager::instance().load_theme(ctx.args[0])) {
+            std::cout << "Theme '" << ctx.args[0] << "' applied successfully!\n";
+            return 0;
+        } else {
+            std::cout << "Failed to apply theme '" << ctx.args[0] << "'.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(theme_set_cmd);
+
+    CommandInfo theme_create_cmd;
+    theme_create_cmd.name = "theme-create";
+    theme_create_cmd.description = "Create a custom theme";
+    theme_create_cmd.usage = "theme-create <name>";
+    theme_create_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (ctx.args.empty()) {
+            std::cout << "Usage: theme-create <name>\n";
+            return 1;
+        }
+
+        std::string name = ctx.args[0];
+        
+        // Create a basic custom theme
+        novashell::ui::ColorScheme colors;
+        colors.background = {30, 30, 30};    // Dark background
+        colors.foreground = {200, 200, 200}; // Light text
+        colors.primary = {100, 150, 255};    // Blue
+        colors.secondary = {150, 150, 150}; // Gray
+        colors.success = {100, 200, 100};    // Green
+        colors.warning = {255, 200, 100};    // Orange
+        colors.error = {255, 100, 100};      // Red
+        colors.info = {100, 150, 255};       // Blue
+
+        if (novashell::ui::ThemeManager::instance().create_custom_theme(name, colors)) {
+            std::cout << "Custom theme '" << name << "' created successfully!\n";
+            return 0;
+        } else {
+            std::cout << "Failed to create theme.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(theme_create_cmd);
+
+    // Voice Commands
+    CommandInfo voice_start_cmd;
+    voice_start_cmd.name = "voice-start";
+    voice_start_cmd.description = "Start voice command recognition";
+    voice_start_cmd.usage = "voice-start";
+    voice_start_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use voice commands.\n";
+            return 1;
+        }
+
+        (void)ctx; // Suppress unused parameter warning
+        if (!novashell::voice::VoiceCommander::instance().is_initialized()) {
+            std::cout << "Voice commands not initialized. Use 'voice-config' first.\n";
+            return 1;
+        }
+
+        if (novashell::voice::VoiceCommander::instance().start_listening()) {
+            std::cout << "🎤 Voice command recognition started!\n";
+            std::cout << "Say 'Hey Nova' followed by your command.\n";
+            std::cout << "Use 'voice-stop' to stop listening.\n";
+            return 0;
+        } else {
+            std::cout << "Failed to start voice recognition.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(voice_start_cmd);
+
+    CommandInfo voice_stop_cmd;
+    voice_stop_cmd.name = "voice-stop";
+    voice_stop_cmd.description = "Stop voice command recognition";
+    voice_stop_cmd.usage = "voice-stop";
+    voice_stop_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use voice commands.\n";
+            return 1;
+        }
+
+        (void)ctx; // Suppress unused parameter warning
+        novashell::voice::VoiceCommander::instance().stop_listening();
+        std::cout << "🎤 Voice command recognition stopped.\n";
+        return 0;
+    };
+    registry_->register_command(voice_stop_cmd);
+
+    CommandInfo voice_config_cmd;
+    voice_config_cmd.name = "voice-config";
+    voice_config_cmd.description = "Configure voice commands";
+    voice_config_cmd.usage = "voice-config [api_key]";
+    voice_config_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to configure voice commands.\n";
+            return 1;
+        }
+
+        if (!ctx.args.empty()) {
+            // Initialize with API key
+            if (novashell::voice::VoiceCommander::instance().initialize(ctx.args[0])) {
+                std::cout << "🎤 Voice commands initialized successfully!\n";
+                std::cout << "Use 'voice-start' to begin voice recognition.\n";
+                return 0;
+            } else {
+                std::cout << "Failed to initialize voice commands.\n";
+                return 1;
+            }
+        } else {
+            // Show current configuration
+            auto commands = novashell::voice::VoiceCommander::instance().list_voice_commands();
+            std::cout << "Voice Command Configuration:\n";
+            std::cout << "============================\n";
+            std::cout << "Initialized: " << (novashell::voice::VoiceCommander::instance().is_initialized() ? "Yes" : "No") << "\n";
+            std::cout << "Listening: " << (novashell::voice::VoiceCommander::instance().is_listening() ? "Yes" : "No") << "\n";
+            std::cout << "Registered Commands: " << commands.size() << "\n";
+            return 0;
+        }
+    };
+    registry_->register_command(voice_config_cmd);
+
+    // Analytics Dashboard commands
+    CommandInfo dashboard_cmd;
+    dashboard_cmd.name = "dashboard";
+    dashboard_cmd.description = "Show analytics dashboard";
+    dashboard_cmd.usage = "dashboard [name]";
+    dashboard_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to view analytics.\n";
+            return 1;
+        }
+
+        std::string dashboard_name;
+        if (!ctx.args.empty()) {
+            dashboard_name = ctx.args[0];
+        } else {
+            // Show main system dashboard
+            dashboard_name = "system";
+        }
+
+        auto dashboard = novashell::analytics::AnalyticsDashboard::instance().get_dashboard(dashboard_name);
+        if (dashboard.name.empty()) {
+            std::cout << "Dashboard '" << dashboard_name << "' not found.\n";
+            return 1;
+        }
+
+        std::cout << "📊 " << dashboard.name << " Dashboard\n";
+        std::cout << std::string(dashboard.name.length() + 12, '=') << "\n";
+
+        for (const auto& widget : dashboard.widgets) {
+            std::cout << "\n📈 " << widget.title << "\n";
+            std::cout << std::string(widget.title.length() + 4, '-') << "\n";
+            
+            // Show sample data
+            if (!widget.data.data.empty()) {
+                for (size_t i = 0; i < std::min(widget.data.data.size(), size_t(5)); ++i) {
+                    const auto& point = widget.data.data[i];
+                    std::cout << "  " << std::ctime(&point.timestamp)
+                             << "  Value: " << point.value << "\n";
+                }
+            }
+        }
+        return 0;
+    };
+    registry_->register_command(dashboard_cmd);
+
+    CommandInfo analytics_cmd;
+    analytics_cmd.name = "analytics";
+    analytics_cmd.description = "Show analytics metrics";
+    analytics_cmd.usage = "analytics [metric]";
+    analytics_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to view analytics.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            // Show overview
+            auto top_commands = novashell::analytics::AnalyticsDashboard::instance().get_top_commands(5);
+            std::cout << "📊 Command Analytics (Top 5):\n";
+            std::cout << "=============================\n";
+            for (const auto& pair : top_commands) {
+                std::cout << "  " << pair.first << ": " << pair.second << " times\n";
+            }
+            return 0;
+        }
+
+        // Show specific metric
+        std::string metric = ctx.args[0];
+        if (metric == "cpu") {
+            auto cpu_history = novashell::analytics::AnalyticsDashboard::instance().get_cpu_usage_history(1);
+            std::cout << "📊 CPU Usage History (Last Hour):\n";
+            std::cout << "==================================\n";
+            for (const auto& point : cpu_history.data) {
+                std::cout << "  " << std::ctime(&point.timestamp)
+                         << "  CPU: " << point.value << "%\n";
+            }
+        } else if (metric == "memory") {
+            auto mem_history = novashell::analytics::AnalyticsDashboard::instance().get_memory_usage_history(1);
+            std::cout << "📊 Memory Usage History (Last Hour):\n";
+            std::cout << "=====================================\n";
+            for (const auto& point : mem_history.data) {
+                std::cout << "  " << std::ctime(&point.timestamp)
+                         << "  Memory: " << point.value << "%\n";
+            }
+        } else {
+            std::cout << "Available metrics: cpu, memory\n";
+        }
+        return 0;
+    };
+    registry_->register_command(analytics_cmd);
+
+    // Environment Manager commands
+    CommandInfo env_switch_cmd;
+    env_switch_cmd.name = "env-switch";
+    env_switch_cmd.description = "Switch to a different environment profile";
+    env_switch_cmd.usage = "env-switch <profile_name>";
+    env_switch_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to manage environments.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: env-switch <profile_name>\n";
+            std::cout << "Use 'env-list' to see available profiles.\n";
+            return 1;
+        }
+
+        if (env::EnvironmentManager::instance().switch_profile(ctx.args[0])) {
+            std::cout << "🔄 Switched to environment profile: " << ctx.args[0] << "\n";
+            
+            // Show current environment info
+            auto profile = env::EnvironmentManager::instance().get_profile(ctx.args[0]);
+            if (!profile.name.empty()) {
+                std::cout << "Environment Details:\n";
+                if (!profile.sdk_path.empty()) {
+                    std::cout << "  SDK Path: " << profile.sdk_path << "\n";
+                }
+                if (!profile.compiler.empty()) {
+                    std::cout << "  Compiler: " << profile.compiler << "\n";
+                }
+                if (!profile.python_version.empty()) {
+                    std::cout << "  Python: " << profile.python_version << "\n";
+                }
+                if (!profile.node_version.empty()) {
+                    std::cout << "  Node.js: " << profile.node_version << "\n";
+                }
+            }
+            return 0;
+        } else {
+            std::cout << "Failed to switch to profile '" << ctx.args[0] << "'.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(env_switch_cmd);
+
+    CommandInfo env_list_cmd;
+    env_list_cmd.name = "env-list";
+    env_list_cmd.description = "List available environment profiles";
+    env_list_cmd.usage = "env-list";
+    env_list_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to manage environments.\n";
+            return 1;
+        }
+
+        (void)ctx; // Suppress unused parameter warning
+        auto profiles = env::EnvironmentManager::instance().list_profiles();
+        if (profiles.empty()) {
+            std::cout << "No environment profiles found.\n";
+            std::cout << "Use 'env-create <name>' to create one.\n";
+            return 0;
+        }
+
+        std::cout << "Environment Profiles:\n";
+        std::cout << "=====================\n";
+        for (const auto& profile : profiles) {
+            std::cout << "📁 " << profile.name << "\n";
+            if (!profile.description.empty()) {
+                std::cout << "   " << profile.description << "\n";
+            }
+            if (!profile.sdk_path.empty() || !profile.compiler.empty()) {
+                std::cout << "   Tools: ";
+                if (!profile.compiler.empty()) std::cout << profile.compiler << " ";
+                if (!profile.python_version.empty()) std::cout << "Python " << profile.python_version << " ";
+                if (!profile.node_version.empty()) std::cout << "Node " << profile.node_version << " ";
+                std::cout << "\n";
+            }
+            std::cout << "   Last used: " << std::ctime(&profile.last_used);
+        }
+
+        auto current = env::EnvironmentManager::instance().get_current_profile();
+        if (!current.empty()) {
+            std::cout << "\nCurrent profile: " << current << "\n";
+        }
+        return 0;
+    };
+    registry_->register_command(env_list_cmd);
+
+    CommandInfo env_create_cmd;
+    env_create_cmd.name = "env-create";
+    env_create_cmd.description = "Create a new environment profile";
+    env_create_cmd.usage = "env-create <name> [description]";
+    env_create_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to manage environments.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: env-create <name> [description]\n";
+            return 1;
+        }
+
+        std::string name = ctx.args[0];
+        std::string description;
+        if (ctx.args.size() > 1) {
+            description = ctx.args[1];
+            for (size_t i = 2; i < ctx.args.size(); ++i) {
+                description += " " + ctx.args[i];
+            }
+        }
+
+        if (env::EnvironmentManager::instance().create_profile(name, description)) {
+            std::cout << "✅ Environment profile '" << name << "' created successfully!\n";
+            return 0;
+        } else {
+            std::cout << "❌ Failed to create environment profile.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(env_create_cmd);
+}
