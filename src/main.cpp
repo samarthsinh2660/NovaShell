@@ -11,7 +11,7 @@ core::Shell* g_shell = nullptr;
 
 void signal_handler(int signal) {
     if (signal == SIGINT || signal == SIGTERM) {
-        std::cout << "\nShutting down CustomOS Shell...\n";
+        std::cout << "\nShutting down NovaShell...\n";
         if (g_shell) {
             g_shell->shutdown();
         }
@@ -30,7 +30,7 @@ int main(int argc, char* argv[]) {
         g_shell = &shell;
 
         if (!shell.initialize()) {
-            std::cerr << "Failed to initialize CustomOS Shell\n";
+            std::cerr << "Failed to initialize NovaShell\n";
             return 1;
         }
 

@@ -1,4 +1,4 @@
-﻿# NovaShell Setup & Installation Guide
+# NovaShell Setup & Installation Guide
 
 ## Quick Start (Windows)
 
@@ -15,7 +15,7 @@ This will automatically install:
 - **Chocolatey** - Package manager for Windows
 - **MinGW-w64** - GCC 11+ compiler with C++17 support
 - **OpenSSL** - Cryptography library
-- **SQLite3** - Database engine
+- **SQLite3** - Database engine (MSYS2 preferred, Chocolatey fallback)
 - **CMake** - Build system
 
 ### Build NovaShell
@@ -36,6 +36,12 @@ After dependencies are installed:
 ### Run NovaShell
 
 `powershell
+### "SQLite3 not found" when double-clicking
+Use the launcher script which ensures proper PATH:
+`powershell
+.\run-novashell.ps1
+`
+# Or run directly
 .\build\bin\customos-shell.exe
 `
 
@@ -109,6 +115,13 @@ choco install mingw cmake -y
 
 ### 3. Install Libraries
 
+**Automated (Recommended):**
+`powershell
+# Uses MSYS2 if available, falls back to Chocolatey
+.\setup-dependencies.ps1 -SkipGCC -SkipOpenSSL -SkipCMake
+`
+
+**Manual:**
 `powershell
 choco install openssl sqlite -y
 `
@@ -275,6 +288,15 @@ Make sure you're using MinGW-w64 and not the older MinGW:
 cmake .. -G "MinGW Makefiles" -DCMAKE_SH="CMAKE_SH-NOTFOUND"
 `
 
+### "SQLite3 not found" when double-clicking executable
+Use the launcher script which ensures proper PATH setup:
+`powershell
+.\run-novashell.ps1
+`
+
+This ensures MSYS2 libraries are available for SQLite3 functionality.
+
+
 ---
 
 ## Verification
@@ -335,6 +357,105 @@ Build date: [date] [time]
 
 ### First Run Setup
 On first run, the shell will initialize automatically.
+
+---
+
+## User Authentication & Password Management
+
+NovaShell includes a secure user authentication system with encrypted password storage.
+
+### Default Admin Account
+- **Username**: `admin`
+- **Password**: `admin`
+
+**⚠️ Important**: Change the default admin password after first login for security!
+
+### Authentication Commands
+
+#### Login as Existing User
+```bash
+novashell> login admin
+Password for admin: admin
+Login successful! Welcome, admin.
+```
+
+#### Create a New User Account
+```bash
+novashell> create-user samarth mypassword123
+User 'samarth' created successfully!
+You can now login with: login samarth
+```
+
+#### Check Current User
+```bash
+novashell> whoami
+admin
+```
+
+#### Logout
+```bash
+novashell> logout
+Logged out successfully. Goodbye, admin!
+```
+
+### Password Vault (Requires Login)
+
+Once authenticated, you can securely store and manage passwords:
+
+#### Store a New Password
+```bash
+novashell> vault-add
+Service name: gmail
+Username: your.email@gmail.com
+Password: yourpassword123
+Password stored successfully!
+```
+
+#### List Stored Passwords
+```bash
+novashell> vault-list
+1. gmail (your.email@gmail.com)
+2. github (yourusername)
+3. bank (account123)
+```
+
+#### Retrieve a Password
+```bash
+novashell> vault-get gmail
+Service: gmail
+Username: your.email@gmail.com
+Password: yourpassword123
+```
+
+#### Other Vault Commands
+```bash
+vault-update <service>    # Update existing password
+vault-delete <service>    # Remove password entry
+vault-search <term>       # Search passwords
+```
+
+### Security Features
+
+- **Encrypted Storage**: All passwords encrypted with OpenSSL AES-256
+- **User Isolation**: Each user has their own encrypted vault
+- **Secure Hashing**: Passwords hashed with SHA-256 + salt
+- **Access Control**: Authentication required for vault access
+
+### Getting Started with Password Management
+
+1. **Start NovaShell**: `./build/bin/customos-shell.exe`
+2. **Login**: `login admin` (password: `admin`)
+3. **Change Admin Password** (recommended):
+   ```bash
+   novashell> create-user myadmin newsecurepassword
+   novashell> logout
+   novashell> login myadmin
+   # Now delete the default admin account if desired
+   ```
+4. **Store Your First Password**: `vault-add`
+5. **Explore Vault Features**: `vault-list`, `vault-get`
+
+**Note**: All vault operations require user authentication. Passwords are encrypted and can only be accessed by the account owner.
 
 ---
 

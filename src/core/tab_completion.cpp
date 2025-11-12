@@ -211,11 +211,13 @@ std::vector<CompletionMatch> TabCompletion::complete_directories(const std::stri
 
 std::vector<CompletionMatch> TabCompletion::complete_users(const std::string& prefix) {
     // TODO: Get users from authentication system
+    (void)prefix; // Suppress unused parameter warning
     return {};
 }
 
 std::vector<CompletionMatch> TabCompletion::complete_environment_vars(const std::string& prefix) {
     // TODO: Get environment variables
+    (void)prefix; // Suppress unused parameter warning
     return {};
 }
 
@@ -233,6 +235,7 @@ std::vector<CompletionMatch> TabCompletion::complete_git_branches(const std::str
         }
     }
     
+    (void)prefix; // Suppress unused parameter warning
     return matches;
 }
 
@@ -252,6 +255,7 @@ std::vector<CompletionMatch> TabCompletion::complete_db_tables(const std::string
     }
 #endif
     
+    (void)prefix; // Suppress unused parameter warning
     return matches;
 }
 
@@ -271,10 +275,13 @@ std::vector<CompletionMatch> TabCompletion::complete_db_columns(const std::strin
     }
 #endif
     
+    (void)table;   // Suppress unused parameter warning
+    (void)prefix;  // Suppress unused parameter warning
     return matches;
 }
 
 std::vector<CompletionMatch> TabCompletion::complete_plugins(const std::string& prefix) {
+    (void)prefix; // Suppress unused parameter warning
     // TODO: Get plugins from plugin manager
     return {};
 }

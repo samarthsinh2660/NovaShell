@@ -27,6 +27,9 @@ bool VirtualFileSystem::mount(const std::string& device, const std::string& moun
     
     // TODO: Create appropriate filesystem implementation based on type
     // For now, just log the mount operation
+    (void)device;    // Suppress unused parameter warning
+    (void)mount_point; // Suppress unused parameter warning
+    (void)type;      // Suppress unused parameter warning
     return true;
 }
 
@@ -63,11 +66,15 @@ std::vector<FileInfo> VirtualFileSystem::list(const std::string& path) {
 
 bool VirtualFileSystem::copy(const std::string& source, const std::string& destination) {
     // TODO: Implement file copy
+    (void)source;      // Suppress unused parameter warning
+    (void)destination; // Suppress unused parameter warning
     return false;
 }
 
 bool VirtualFileSystem::move(const std::string& source, const std::string& destination) {
     // TODO: Implement file move
+    (void)source;      // Suppress unused parameter warning
+    (void)destination; // Suppress unused parameter warning
     return false;
 }
 

@@ -79,17 +79,44 @@ if (-not $SkipOpenSSL) {
     Write-Host "[3/5] Skipping OpenSSL installation (--SkipOpenSSL specified)" -ForegroundColor Yellow
 }
 
-# Install SQLite
+# Install SQLite (prefer MSYS2 for complete dev libraries, fallback to Chocolatey)
 if (-not $SkipSQLite) {
     Write-Host ""
     Write-Host "[4/5] Checking for SQLite..." -ForegroundColor Green
-    
-    if (-not (Get-Command sqlite3 -ErrorAction SilentlyContinue) -or $Force) {
-        Write-Host "  Installing SQLite..." -ForegroundColor Yellow
+
+    # Check for MSYS2
+    $msys2Path = "C:\msys64"
+
+    if (Test-Path $msys2Path) {
+        Write-Host "  MSYS2 found. Installing SQLite3 development libraries..." -ForegroundColor Yellow
+        Write-Host "  This provides complete headers and libraries for development." -ForegroundColor Cyan
+
+        # Create a temporary batch file for MSYS2 commands
+        $tempBatch = "$env:TEMP\msys2_sqlite_install.bat"
+        @"
+@echo off
+"$msys2Path\msys2.exe" -c "pacman -Syu --noconfirm && pacman -S mingw-w64-x86_64-sqlite3 --noconfirm"
+"@ | Out-File -FilePath $tempBatch -Encoding ASCII
+
+        try {
+            & $tempBatch
+            Write-Host "  SQLite3 development libraries installed via MSYS2!" -ForegroundColor Green
+            Write-Host "  This provides complete CMake support and development headers." -ForegroundColor Cyan
+        }
+        catch {
+            Write-Host "  MSYS2 installation failed. Falling back to Chocolatey..." -ForegroundColor Yellow
+            choco install sqlite -y --force
+            Write-Host "  SQLite installed via Chocolatey." -ForegroundColor Green
+        }
+        finally {
+            Remove-Item $tempBatch -ErrorAction SilentlyContinue
+        }
+    }
+    else {
+        Write-Host "  MSYS2 not found. Installing SQLite via Chocolatey..." -ForegroundColor Yellow
         choco install sqlite -y --force
         Write-Host "  SQLite installed successfully!" -ForegroundColor Green
-    } else {
-        Write-Host "  SQLite already installed." -ForegroundColor Green
+        Write-Host "  Note: For complete development support, consider installing MSYS2." -ForegroundColor Cyan
     }
 } else {
     Write-Host ""
@@ -132,7 +159,11 @@ Write-Host "Installed Dependencies:" -ForegroundColor Green
 Write-Host "  - Chocolatey Package Manager" -ForegroundColor White
 if (-not $SkipGCC) { Write-Host "  - MinGW-w64 (GCC 11+)" -ForegroundColor White }
 if (-not $SkipOpenSSL) { Write-Host "  - OpenSSL" -ForegroundColor White }
-if (-not $SkipSQLite) { Write-Host "  - SQLite3" -ForegroundColor White }
+if (-not $SkipSQLite) {
+    Write-Host "  - SQLite3 (Development Libraries)" -ForegroundColor White
+    Write-Host "    * MSYS2 preferred for complete dev support" -ForegroundColor Gray
+    Write-Host "    * Chocolatey fallback for basic functionality" -ForegroundColor Gray
+}
 Write-Host "  - CMake" -ForegroundColor White
 
 Write-Host ""

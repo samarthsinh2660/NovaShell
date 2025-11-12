@@ -89,13 +89,18 @@ find_library(SQLITE3_LIBRARY
         "C:/MinGW/lib"
         "C:/MinGW-w64/lib"
         "$ENV{ProgramFiles}/SQLite"
+        # MSYS2 paths
+        "C:/msys64/mingw64/lib"
+        "C:/msys64/usr/lib"
+        "/mingw64/lib"
+        "/usr/lib"
 )
 
 if(NOT SQLITE3_LIBRARY)
-    # Try to find in PATH directories
+    # Try to find in PATH directories and MSYS2
     find_file(SQLITE3_LIB_FILE 
-        NAMES sqlite3.lib libsqlite3.a sqlite3.dll
-        PATHS $ENV{PATH}
+        NAMES sqlite3.lib libsqlite3.a sqlite3.dll libsqlite3.dll.a
+        PATHS $ENV{PATH} "C:/msys64/mingw64/bin" "C:/msys64/usr/bin"
     )
     if(SQLITE3_LIB_FILE)
         get_filename_component(SQLITE3_LIB_DIR ${SQLITE3_LIB_FILE} DIRECTORY)
@@ -104,6 +109,15 @@ if(NOT SQLITE3_LIBRARY)
             PATHS ${SQLITE3_LIB_DIR}
             NO_DEFAULT_PATH
         )
+        
+        # Also try to find header
+        find_file(SQLITE3_HEADER_FILE 
+            NAMES sqlite3.h
+            PATHS "C:/msys64/mingw64/include" "C:/msys64/usr/include"
+        )
+        if(SQLITE3_HEADER_FILE)
+            get_filename_component(SQLITE3_INCLUDE_DIR ${SQLITE3_HEADER_FILE} DIRECTORY)
+        endif()
     endif()
 endif()
 
@@ -211,9 +225,8 @@ set(SCHEDULER_SOURCES
 )
 
 set(DATABASE_SOURCES
-    # Disabled - requires SQLite3 which is not installed
-    # src/database/internal_db.cpp
-    # src/database/db_manager.cpp
+    src/database/internal_db.cpp
+    src/database/db_manager.cpp
 )
 
 set(GIT_SOURCES
@@ -262,6 +275,11 @@ endif()
 if(HAVE_SQLITE3)
     target_link_libraries(customos-shell ${SQLITE3_LIBRARY})
     target_compile_definitions(customos-shell PRIVATE HAVE_SQLITE3)
+    if(SQLITE3_INCLUDE_DIR)
+        target_include_directories(customos-shell PRIVATE ${SQLITE3_INCLUDE_DIR})
+    endif()
+    # Also add MSYS2 include directory explicitly
+    target_include_directories(customos-shell PRIVATE "C:/msys64/mingw64/include")
 endif()
 
 if(HAVE_PCAP)

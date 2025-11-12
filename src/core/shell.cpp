@@ -22,7 +22,7 @@ namespace customos {
 namespace core {
 
 Shell::Shell() 
-    : prompt_("customos> ")
+    : prompt_("novashell> ")
     , running_(false)
     , initialized_(false) {
 }
@@ -45,7 +45,7 @@ bool Shell::initialize() {
         logger.enable_console_output(false);
         logger.enable_file_output(false);  // Disable file logging
 
-        LOG_INFO("Initializing CustomOS Shell...");
+        LOG_INFO("Initializing NovaShell...");
 
         // Authentication uses singleton, no need to initialize
         
@@ -63,7 +63,7 @@ bool Shell::initialize() {
         display_welcome();
 
         initialized_ = true;
-        LOG_INFO("CustomOS Shell initialized successfully");
+        LOG_INFO("NovaShell initialized successfully");
         return true;
     }
     catch (const std::exception& e) {
@@ -164,7 +164,7 @@ void Shell::shutdown() {
         return;
     }
 
-    LOG_INFO("Shutting down CustomOS Shell...");
+    LOG_INFO("Shutting down NovaShell...");
 
     running_ = false;
     
