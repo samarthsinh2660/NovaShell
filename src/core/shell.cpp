@@ -14,6 +14,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <conio.h> // For Windows password input
 #else
 #include <unistd.h>
 #include <termios.h>
@@ -224,15 +225,15 @@ std::string Shell::read_input() {
 }
 
 std::string Shell::read_input_with_completion() {
-    std::string input;
     std::string current_line;
     size_t cursor_pos = 0;
     std::vector<std::string> completion_matches;
     size_t completion_index = 0;
-    std::string original_line;  // Store the line being edited for history
+    std::string original_line;
 
 #ifdef _WIN32
     HANDLE hConsole = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE hOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD mode;
     GetConsoleMode(hConsole, &mode);
     SetConsoleMode(hConsole, mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT));
@@ -249,13 +250,11 @@ std::string Shell::read_input_with_completion() {
 #endif
 
         if (ch == '\n' || ch == '\r') {
-            std::cout << "\n";
-            history_index_ = -1;  // Reset history navigation
+            std::cout << std::endl;
             break;
         }
         else if (ch == '\t') {  // Tab key pressed
             if (completion_matches.empty()) {
-                // Get completions for current input
                 auto matches = core::TabCompletion::instance().complete(current_line, cursor_pos);
                 for (const auto& match : matches) {
                     completion_matches.push_back(match.text);
@@ -264,25 +263,32 @@ std::string Shell::read_input_with_completion() {
             }
 
             if (!completion_matches.empty()) {
-                // Show current completion
-                std::string completion = completion_matches[completion_index];
+                if (completion_matches.size() == 1) {
+                    // Single match - complete immediately
+                    std::string completion = completion_matches[0];
+                    current_line = completion;
+                    cursor_pos = current_line.length();
 
-                // Update line and redraw
-                current_line = completion;
-                cursor_pos = current_line.length();
+                    std::cout << "\r" << prompt_;
+                    std::cout << current_line;
+                    std::cout.flush();
+                } else {
+                    // Multiple matches - show options below
+                    std::cout << "\n";  // Move to next line
+                    for (size_t i = 0; i < completion_matches.size() && i < 10; ++i) {
+                        if (i > 0) std::cout << "  ";
+                        std::cout << completion_matches[i];
+                    }
+                    std::cout << "\n" << prompt_ << current_line;  // Back to current line
+                    std::cout.flush();
+                }
 
-                std::cout << "\r" << prompt_;
-                std::cout << current_line;
-                std::cout.flush();
-
-                // Move to next completion for next tab
                 completion_index = (completion_index + 1) % completion_matches.size();
             }
         }
         else if (ch == 27) {  // ESC key - start of escape sequence
-            // Read the next characters to detect arrow keys
             int seq1 = 0, seq2 = 0;
-            
+
 #ifdef _WIN32
             ReadConsole(hConsole, &seq1, 1, &read, NULL);
             if (seq1 == '[') {
@@ -299,19 +305,18 @@ std::string Shell::read_input_with_completion() {
                 if (seq2 == 'A') {  // Up arrow
                     if (!command_history_.empty()) {
                         if (history_index_ == -1) {
-                            // First time pressing up, save current input
                             original_line = current_line;
                             history_index_ = command_history_.size() - 1;
                         } else if (history_index_ > 0) {
                             history_index_--;
                         }
 
-                        // Update current line and redraw
                         current_line = command_history_[history_index_];
                         cursor_pos = current_line.length();
 
-                        std::cout << "\r" << prompt_;  // Move to start and show prompt
-                        std::cout << current_line;     // Show history command
+                        // Clear line and rewrite with prompt
+                        std::cout << "\r" << prompt_;
+                        std::cout << current_line;
                         std::cout.flush();
                     }
                 }
@@ -320,71 +325,85 @@ std::string Shell::read_input_with_completion() {
                         if (history_index_ < static_cast<int>(command_history_.size()) - 1) {
                             history_index_++;
                             current_line = command_history_[history_index_];
-                            cursor_pos = current_line.length();
-
-                            std::cout << "\r" << prompt_;
-                            std::cout << current_line;
                         } else {
-                            // At end of history, restore original line
                             history_index_ = -1;
                             current_line = original_line;
-                            cursor_pos = current_line.length();
-
-                            std::cout << "\r" << prompt_;
-                            std::cout << current_line;
                         }
+                        cursor_pos = current_line.length();
+
+#ifdef _WIN32
+                        CONSOLE_SCREEN_BUFFER_INFO csbi;
+                        GetConsoleScreenBufferInfo(hOutput, &csbi);
+                        COORD startPos = {0, csbi.dwCursorPosition.Y};
+                        DWORD written;
+                        FillConsoleOutputCharacter(hOutput, ' ', csbi.dwSize.X, startPos, &written);
+                        SetConsoleCursorPosition(hOutput, startPos);
+                        std::cout << prompt_ << current_line;
+#else
+                        std::cout << "\r" << prompt_ << current_line;
+#endif
                         std::cout.flush();
                     }
                 }
             }
-            // Reset completions when navigating history
             completion_matches.clear();
         }
         else if (ch == 127 || ch == 8) {  // Backspace
             if (!current_line.empty() && cursor_pos > 0) {
-                // Remove character from string
                 current_line.erase(cursor_pos - 1, 1);
                 cursor_pos--;
 
-                // Clear the entire line and redraw it
-                std::cout << "\r" << prompt_;  // Move to start of line and show prompt
-                std::cout << current_line;     // Show current line
+                // Clear from cursor position to end of line and redraw
+#ifdef _WIN32
+                CONSOLE_SCREEN_BUFFER_INFO csbi;
+                GetConsoleScreenBufferInfo(hOutput, &csbi);
+                COORD cursorPosCoord = csbi.dwCursorPosition;
+                cursorPosCoord.X--;  // Move back one position
+                SetConsoleCursorPosition(hOutput, cursorPosCoord);
 
-                // If cursor is not at the end, we need to position it correctly
+                // Clear from new cursor position to end of line
+                DWORD written;
+                FillConsoleOutputCharacter(hOutput, ' ', csbi.dwSize.X - cursorPosCoord.X, cursorPosCoord, &written);
+
+                // Redraw the remaining text
+                std::cout << current_line.substr(cursor_pos);
+                SetConsoleCursorPosition(hOutput, cursorPosCoord);
+#else
+                std::cout << "\b\033[K";
                 if (cursor_pos < current_line.length()) {
-                    // Move cursor back to the correct position
+                    std::cout << current_line.substr(cursor_pos);
                     for (size_t i = 0; i < current_line.length() - cursor_pos; ++i) {
                         std::cout << "\b";
                     }
                 }
-
+#endif
                 std::cout.flush();
             }
-            completion_matches.clear();  // Reset completions on edit
-            history_index_ = -1;  // Reset history navigation on edit
+            completion_matches.clear();
+            history_index_ = -1;
             original_line = current_line;
         }
         else if (ch >= 32 && ch <= 126) {  // Printable character
             current_line.insert(cursor_pos, 1, (char)ch);
             cursor_pos++;
 
-            // Redraw from cursor position to end of line
-            std::cout << "\r" << prompt_;  // Move to start of line and show prompt
-            std::cout << current_line;     // Show updated line
+            // Redraw entire line to avoid cursor positioning issues
+            std::cout << "\r" << prompt_;
+            std::cout << current_line;
 
-            // Position cursor at the correct location
+            // Position cursor correctly
             if (cursor_pos < current_line.length()) {
                 for (size_t i = 0; i < current_line.length() - cursor_pos; ++i) {
                     std::cout << "\b";
                 }
             }
-
             std::cout.flush();
-            completion_matches.clear();  // Reset completions on edit
-            history_index_ = -1;  // Reset history navigation on edit
+
+            completion_matches.clear();
+            history_index_ = -1;
             original_line = current_line;
         }
-        // Ignore other control characters for now
+        // Ignore other control characters
     }
 
 #ifdef _WIN32

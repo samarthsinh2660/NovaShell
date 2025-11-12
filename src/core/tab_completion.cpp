@@ -140,8 +140,23 @@ std::vector<CompletionMatch> TabCompletion::complete_commands(const std::string&
     std::vector<CompletionMatch> matches;
     
     std::vector<std::string> commands = {
-        "help", "version", "exit", "git", "db", "vault-add", "net-sniff", 
-        "monitor-start", "ai-suggest", "note-add", "env-switch"
+        "help", "version", "exit", "quit", "clear", "cls", "whoami",
+        "login", "logout", "create-user", "adduser",
+        "vault-init", "vault-unlock", "vault-lock", "vault-add", "vault-get", "vault-list", "vault-delete", "vault-search",
+        "git", "git-status", "git-add", "git-commit", "git-push", "git-pull", "git-branch", "git-checkout", "git-log",
+        "db", "db-connect", "db-query", "db-list-tables", "db-export", "db-import",
+        "net-interfaces", "net-stats", "net-capture", "net-stop", "net-packets", "net-protocols",
+        "monitor-start", "monitor-stats", "proc-list", "proc-kill",
+        "note-add", "note-list", "note-get", "snippet-add", "snippet-get", "snippet-search",
+        "env-create", "env-switch", "env-list",
+        "p2p-start", "p2p-share", "p2p-get", "p2p-peers",
+        "task-schedule", "task-list", "remind", "remind-list",
+        "dashboard", "analytics",
+        "ai-init", "ai-suggest",
+        "theme-list", "theme-set", "theme-create",
+        "ssh-start", "ssh-stop", "ssh-connections",
+        "container-list", "container-start", "container-stop", "image-pull", "image-build",
+        "docker-init", "docker-ps"
     };
     
     for (const auto& cmd : commands) {
