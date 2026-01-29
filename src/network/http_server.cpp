@@ -2,6 +2,7 @@
 #include "logging/logger.h"
 #include <iostream>
 #include <sstream>
+#include <fstream>
 #include <regex>
 #include <chrono>
 #include <thread>
@@ -55,6 +56,9 @@ struct HttpServer::Impl {
     std::atomic<uint64_t> bytes_received{0};
     std::atomic<uint64_t> bytes_sent{0};
     std::chrono::steady_clock::time_point start_time;
+
+    // Parent reference
+    HttpServer* parent = nullptr;
 
     // Utility functions
     std::vector<std::string> split(const std::string& s, char delimiter) {
@@ -161,7 +165,7 @@ struct HttpServer::Impl {
         return req;
     }
 
-    std::string generate_response(const HttpResponse& resp) {
+    std::string generate_response(HttpResponse& resp) {
         std::ostringstream oss;
 
         // Status line
@@ -222,7 +226,7 @@ struct HttpServer::Impl {
                 }
 
                 // Handle request
-                handle_request(req, resp);
+                parent->handle_request(req, resp);
 
                 // Send response
                 std::string response_str = generate_response(resp);
@@ -230,7 +234,7 @@ struct HttpServer::Impl {
                 bytes_sent += response_str.length();
 
                 // Log request
-                log_request(req, resp);
+                parent->log_request(req, resp);
             }
         } catch (const std::exception& e) {
             LOG_ERROR("HTTP server error handling client: " + std::string(e.what()));
@@ -263,6 +267,7 @@ struct HttpServer::Impl {
 };
 
 HttpServer::HttpServer() : pimpl_(std::make_unique<Impl>()) {
+    pimpl_->parent = this;
 }
 
 HttpServer::~HttpServer() {

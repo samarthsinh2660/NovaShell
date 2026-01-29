@@ -652,7 +652,15 @@ CodeAnalyzer::CodeAnalysisResult CodeAnalyzer::analyze_file(const std::string& f
     // Read file content
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        result.issues.push_back({"error", "Could not open file: " + filepath, filepath, 0, 0, "", "", 10, "file"});
+        CodeIssue issue;
+        issue.type = "error";
+        issue.message = "Could not open file: " + filepath;
+        issue.file = filepath;
+        issue.line_number = 0;
+        issue.column = 0;
+        issue.severity = 10;
+        issue.category = "file";
+        result.issues.push_back(issue);
         return result;
     }
 
@@ -685,10 +693,27 @@ CodeAnalyzer::CodeAnalysisResult CodeAnalyzer::analyze_code(const std::string& c
                            std::count(code.begin(), code.end(), '(');
 
     // Mock analysis results (would be replaced with actual AI analysis)
-    result.issues = {
-        {"warning", "Consider using const for read-only parameters", "", 15, 10, "int process(int value)", "Add const qualifier", 3, "style"},
-        {"info", "Function could be marked as constexpr", "", 25, 5, "int calculate(int x, int y)", "Use constexpr for compile-time evaluation", 2, "optimization"}
-    };
+    CodeIssue issue1;
+    issue1.type = "warning";
+    issue1.message = "Consider using const for read-only parameters";
+    issue1.line_number = 15;
+    issue1.column = 10;
+    issue1.code_snippet = "int process(int value)";
+    issue1.suggestion = "Add const qualifier";
+    issue1.severity = 3;
+    issue1.category = "style";
+    result.issues.push_back(issue1);
+
+    CodeIssue issue2;
+    issue2.type = "info";
+    issue2.message = "Function could be marked as constexpr";
+    issue2.line_number = 25;
+    issue2.column = 5;
+    issue2.code_snippet = "int calculate(int x, int y)";
+    issue2.suggestion = "Use constexpr for compile-time evaluation";
+    issue2.severity = 2;
+    issue2.category = "optimization";
+    result.issues.push_back(issue2);
 
     result.issue_counts["warning"] = 1;
     result.issue_counts["info"] = 1;
@@ -710,7 +735,9 @@ std::string CodeAnalyzer::generate_code(const CodeGenerationRequest& request) {
     ai::PromptContext context;
     context.language = request.language;
     context.task_description = request.description;
-    context.parameters = request.parameters;
+    for (const auto& param : request.parameters) {
+        context.parameters[param.first] = param.second;
+    }
     context.parameters["type"] = request.type;
 
     // Add requirements if available
@@ -737,7 +764,7 @@ CodeAnalyzer::CodeEditResult CodeAnalyzer::edit_code(const CodeEditRequest& requ
     // Read the original file
     std::ifstream file(request.filepath);
     if (!file.is_open()) {
-        result.error_message = "Could not open file: " + request.filepath;
+        result.explanation ="Could not open file: " + request.filepath;
         return result;
     }
 
@@ -745,16 +772,20 @@ CodeAnalyzer::CodeEditResult CodeAnalyzer::edit_code(const CodeEditRequest& requ
                              std::istreambuf_iterator<char>());
 
     if (!GeminiClient::instance().is_initialized()) {
-        result.error_message = "AI client not initialized. Please run ai-init with your API key";
+        result.explanation ="AI client not initialized. Please run ai-init with your API key";
         return result;
     }
 
     // Build context for prompt manager
     ai::PromptContext context;
-    context.language = request.language;
+    // Detect language from filepath extension
+    context.language = "auto";
+    if (request.filepath.find_last_of('.') != std::string::npos) {
+        context.language = request.filepath.substr(request.filepath.find_last_of('.') + 1);
+    }
     context.task_description = request.operation;
     context.current_code = original_code;
-    context.context_info = request.context;
+    context.context_info = "Target: " + request.target;
 
     // Generate optimized prompt using AIPromptManager
     std::string prompt = ai::AIPromptManager::instance().generate_code_editing_prompt(context);
@@ -765,7 +796,7 @@ CodeAnalyzer::CodeEditResult CodeAnalyzer::edit_code(const CodeEditRequest& requ
         result.edited_code = response.content;
         result.success = true;
     } else {
-        result.error_message = "Failed to generate edited code";
+        result.explanation ="Failed to generate edited code";
     }
 
     return result;
@@ -886,12 +917,28 @@ CodeAnalyzer::CodeReviewResult CodeAnalyzer::review_code(const std::string& code
     }
 
     result.overall_rating = "Good";
-    result.critical_issues = {
-        {"warning", "Consider adding input validation", "", 10, 5, "function validateInput()", "Add null checks", 4, "security"}
-    };
-    result.suggestions = {
-        {"info", "Consider extracting this into a separate function", "", 25, 1, "long function block", "Improve readability", 2, "maintainability"}
-    };
+
+    CodeIssue critical1;
+    critical1.type = "warning";
+    critical1.message = "Consider adding input validation";
+    critical1.line_number = 10;
+    critical1.column = 5;
+    critical1.code_snippet = "function validateInput()";
+    critical1.suggestion = "Add null checks";
+    critical1.severity = 4;
+    critical1.category = "security";
+    result.critical_issues.push_back(critical1);
+
+    CodeIssue suggestion1;
+    suggestion1.type = "info";
+    suggestion1.message = "Consider extracting this into a separate function";
+    suggestion1.line_number = 25;
+    suggestion1.column = 1;
+    suggestion1.code_snippet = "long function block";
+    suggestion1.suggestion = "Improve readability";
+    suggestion1.severity = 2;
+    suggestion1.category = "maintainability";
+    result.suggestions.push_back(suggestion1);
     result.security_concerns = {"Potential SQL injection if input not sanitized"};
     result.best_practices_violated = {"Missing error handling", "No logging"};
     result.metrics = {{"cyclomatic_complexity", 5}, {"maintainability_index", 75}, {"lines_of_code", 150}};

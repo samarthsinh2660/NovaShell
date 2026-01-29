@@ -8,6 +8,8 @@
 #ifdef HAVE_OPENSSL
 #include <openssl/evp.h>
 #include <openssl/aes.h>
+#include <openssl/sha.h>
+#include <openssl/rand.h>
 #endif
 
 namespace customos {

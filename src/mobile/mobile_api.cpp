@@ -5,11 +5,11 @@
 #include "vault/password_manager.h"
 #include "database/internal_db.h"
 #include "monitor/system_monitor.h"
-#include "vfs/virtual_file_system.h"
+#include "vfs/virtual_filesystem.h"
 #include "notes/snippet_manager.h"
 #include "logging/logger.h"
-#include <nlohmann/json.hpp>
-#include <jwt-cpp/jwt.h>
+// #include <nlohmann/json.hpp>  // Not available
+// #include <jwt-cpp/jwt.h>  // Not available
 #include <random>
 #include <sstream>
 #include <iomanip>

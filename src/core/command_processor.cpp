@@ -2961,12 +2961,6 @@ void CommandProcessor::register_builtin_commands() {
             if (!solution.fixed_code.empty()) {
                 std::cout << "\nFixed Code:\n```cpp\n" << solution.fixed_code << "\n```\n";
             }
-        } else {
-                std::cout << "💡 Improvement Suggestions:\n";
-                for (size_t i = 0; i < suggestions.size(); ++i) {
-                    std::cout << (i + 1) << ". " << suggestions[i] << "\n";
-                }
-            }
         }
 
         return 0;
@@ -3059,7 +3053,7 @@ void CommandProcessor::register_builtin_commands() {
         // Parse additional options
         for (size_t i = 3; i < ctx.args.size(); ++i) {
             if (ctx.args[i].find("=") != std::string::npos) {
-                auto parts = split_string(ctx.args[i], "=");
+                auto parts = split_string(ctx.args[i], '=');
                 if (parts.size() == 2) {
                     request.parameters[parts[0]] = parts[1];
                 }
@@ -3125,7 +3119,7 @@ void CommandProcessor::register_builtin_commands() {
         // Parse options
         for (size_t i = 3; i < ctx.args.size(); ++i) {
             if (ctx.args[i].find("=") != std::string::npos) {
-                auto parts = split_string(ctx.args[i], "=");
+                auto parts = split_string(ctx.args[i], '=');
                 if (parts.size() == 2) {
                     request.options[parts[0]] = parts[1];
                 }
@@ -3477,7 +3471,7 @@ void CommandProcessor::register_builtin_commands() {
         std::vector<std::string> test_types = {"unit", "integration", "edge_cases"};
         if (ctx.args.size() > 2) {
             test_types.clear();
-            auto types = split_string(ctx.args[2], ",");
+            auto types = split_string(ctx.args[2], ',');
             for (const auto& type : types) {
                 test_types.push_back(type);
             }

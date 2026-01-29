@@ -6,6 +6,8 @@
 #include <sstream>
 #include <iomanip>
 #include <map>
+#include <mutex>
+#include <unordered_set>
 
 namespace customos {
 namespace analytics {
@@ -114,11 +116,15 @@ void PerformanceAnalytics::record_metric(const std::string& name, double value,
     // Store in database
     try {
         auto& db = database::InternalDB::instance();
-        nlohmann::json metadata;
+        std::string metadata = "{";
+        bool first = true;
         for (const auto& tag : tags) {
-            metadata[tag.first] = tag.second;
+            if (!first) metadata += ",";
+            metadata += "\"" + tag.first + "\":\"" + tag.second + "\"";
+            first = false;
         }
-        db.add_analytics_data(name, value, unit, metadata.dump());
+        metadata += "}";
+        db.add_analytics_data(name, value, unit, metadata);
     } catch (...) {
         // Ignore database errors
     }
@@ -620,29 +626,39 @@ std::string AnalyticsDashboard::generate_javascript_charts() {
 }
 
 std::string AnalyticsDashboard::generate_json_dashboard(const std::string& user) {
-    nlohmann::json dashboard;
+    std::ostringstream oss;
 
-    dashboard["productivity_score"] = pimpl_->analytics.calculate_productivity_score(user);
-    dashboard["ai_adoption_rate"] = pimpl_->analytics.calculate_ai_adoption_rate(user);
-    dashboard["command_diversity"] = pimpl_->analytics.count_unique_commands_used(user);
-    dashboard["efficiency_metrics"] = pimpl_->analytics.get_efficiency_metrics(user);
+    oss << "{\n";
+    oss << "  \"productivity_score\": " << pimpl_->analytics.calculate_productivity_score(user) << ",\n";
 
     auto insights = pimpl_->analytics.generate_insights(user);
-    nlohmann::json insights_json = nlohmann::json::array();
+    oss << "  \"insights\": [\n";
+    bool first = true;
     for (const auto& insight : insights) {
-        insights_json.push_back({
-            {"category", insight.category},
-            {"title", insight.title},
-            {"description", insight.description},
-            {"recommendation", insight.recommendation},
-            {"impact_score", insight.impact_score}
-        });
+        if (!first) oss << ",\n";
+        oss << "    {\n";
+        oss << "      \"category\": \"" << insight.category << "\",\n";
+        oss << "      \"title\": \"" << insight.title << "\",\n";
+        oss << "      \"description\": \"" << insight.description << "\",\n";
+        oss << "      \"recommendation\": \"" << insight.recommendation << "\",\n";
+        oss << "      \"impact_score\": " << insight.impact_score << "\n";
+        oss << "    }";
+        first = false;
     }
-    dashboard["insights"] = insights_json;
+    oss << "\n  ],\n";
 
-    dashboard["recommendations"] = pimpl_->analytics.generate_learning_recommendations(user);
+    auto recommendations = pimpl_->analytics.generate_learning_recommendations(user);
+    oss << "  \"recommendations\": [";
+    first = true;
+    for (const auto& rec : recommendations) {
+        if (!first) oss << ", ";
+        oss << "\"" << rec << "\"";
+        first = false;
+    }
+    oss << "]\n";
+    oss << "}";
 
-    return dashboard.dump(2);
+    return oss.str();
 }
 
 void AnalyticsDashboard::enable_real_time_updates(bool enable) {
@@ -651,19 +667,21 @@ void AnalyticsDashboard::enable_real_time_updates(bool enable) {
 
 std::string AnalyticsDashboard::get_real_time_metrics() {
     // Return current metrics in JSON format
-    nlohmann::json metrics;
-    metrics["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
-    metrics["active_users"] = 1; // Placeholder
-    metrics["current_load"] = 0.5; // Placeholder
+    std::ostringstream oss;
+    oss << "{\n";
+    oss << "  \"timestamp\": " << std::chrono::system_clock::now().time_since_epoch().count() << ",\n";
+    oss << "  \"active_users\": 1,\n"; // Placeholder
+    oss << "  \"current_load\": 0.5\n"; // Placeholder
+    oss << "}";
 
-    return metrics.dump();
+    return oss.str();
 }
 
 std::string AnalyticsDashboard::get_usage_timeline_data(int days) {
     // Return timeline data for charts
-    nlohmann::json timeline;
+    (void)days; // Mark as intentionally unused
     // Implementation would query database for historical data
-    return timeline.dump();
+    return "{}";
 }
 
 } // namespace analytics

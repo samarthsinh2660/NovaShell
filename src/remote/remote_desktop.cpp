@@ -8,6 +8,7 @@
 #include <random>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -29,6 +30,7 @@ namespace customos {
 namespace remote {
 
 struct RemoteDesktopServer::Impl {
+    RemoteDesktopServer* parent = nullptr;
     std::atomic<bool> running{false};
     int port = 5900;
     int server_socket = -1;
@@ -131,8 +133,8 @@ struct RemoteDesktopServer::Impl {
             // Parse and handle commands
             // This is a simplified implementation
             if (buffer[0] == 0) { // Screen update request
-                auto capture = capture_screen();
-                send_screen_update(session.session_id, capture);
+                auto capture = parent->capture_screen();
+                parent->send_screen_update(session.session_id, capture);
             }
         }
     }
@@ -144,6 +146,7 @@ struct RemoteDesktopServer::Impl {
 };
 
 RemoteDesktopServer::RemoteDesktopServer() : pimpl_(std::make_unique<Impl>()) {
+    pimpl_->parent = this;
 }
 
 RemoteDesktopServer& RemoteDesktopServer::instance() {
@@ -661,6 +664,16 @@ bool RemoteDesktopServer::bring_window_to_front(HWND hwnd) {
     }
 #endif
     return false;
+}
+
+// RemoteDesktopClient implementation
+struct RemoteDesktopClient::Impl {
+    bool connected = false;
+    std::string host;
+    int port = 0;
+};
+
+RemoteDesktopClient::RemoteDesktopClient() : pimpl_(std::make_unique<Impl>()) {
 }
 
 RemoteDesktopClient::~RemoteDesktopClient() {

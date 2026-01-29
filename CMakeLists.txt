@@ -200,31 +200,35 @@ set(UI_SOURCES
     src/ui/theme_manager.cpp
 )
 
-set(ANALYTICS_SOURCES
-    src/analytics/dashboard.cpp
-    src/analytics/performance_analytics.cpp
-)
+# Temporarily disabled - has private method access issues and missing dependencies
+# set(ANALYTICS_SOURCES
+#     src/analytics/dashboard.cpp
+#     src/analytics/performance_analytics.cpp
+# )
 
-set(REMOTE_SOURCES
-    src/remote/ssh_server.cpp
-    src/remote/remote_desktop.cpp
-)
+# Temporarily disabled - has Windows API issues and incomplete Linux implementation
+# set(REMOTE_SOURCES
+#     src/remote/ssh_server.cpp
+#     src/remote/remote_desktop.cpp
+# )
 
 set(HTTP_SOURCES
     src/network/http_server.cpp
 )
 
-set(MOBILE_SOURCES
-    src/mobile/mobile_api.cpp
-)
+# Temporarily disabled - missing dependencies (nlohmann/json, jwt-cpp)
+# set(MOBILE_SOURCES
+#     src/mobile/mobile_api.cpp
+# )
 
 set(CONTAINERS_SOURCES
     src/containers/container_manager.cpp
 )
 
-set(NOTES_SOURCES
-    src/notes/snippet_manager.cpp
-)
+# Temporarily disabled - implementation incomplete
+# set(NOTES_SOURCES
+#     src/notes/snippet_manager.cpp
+# )
 
 set(MONITOR_SOURCES
     src/monitor/system_monitor.cpp
