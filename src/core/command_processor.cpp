@@ -1,6 +1,7 @@
 #include "core/command_processor.h"
 #include "auth/authentication.h"
 #include "database/internal_db.h"
+#include "database/db_manager.h"
 #include "vfs/virtual_filesystem.h"
 #include "vault/password_manager.h"
 #include "monitor/system_monitor.h"
@@ -22,6 +23,7 @@
 #include "analytics/dashboard.h"     // Analytics dashboard
 #include "analytics/performance_analytics.h"  // Performance analytics
 #include "env/environment_manager.h"
+#include "mobile/mobile_api.h"       // Mobile API
 #include <sstream>
 #include <iostream>
 #include <algorithm>
@@ -31,6 +33,7 @@
 #ifdef _WIN32
 #include <conio.h> // For Windows password input
 #undef ERROR  // Avoid conflict with Windows ERROR macro
+#undef interface  // Avoid conflict with Windows interface macro
 #endif
 
 // Helper function to split strings
@@ -51,6 +54,7 @@ namespace plugins = customos::plugins;
 namespace scripting = customos::scripting;
 namespace analytics = customos::analytics;
 namespace ai = customos::ai;
+namespace mobile = customos::mobile;
 
 namespace customos {
 namespace core {
@@ -1279,14 +1283,14 @@ void CommandProcessor::register_builtin_commands() {
             return 1;
         }
 
-        std::string interface = ctx.args.empty() ? 
+        std::string iface = ctx.args.empty() ?
             network::PacketAnalyzer::instance().get_default_interface() : ctx.args[0];
 
         network::PacketFilter filter;
-        bool success = network::PacketAnalyzer::instance().start_capture(interface, filter);
+        bool success = network::PacketAnalyzer::instance().start_capture(iface, filter);
 
         if (success) {
-            std::cout << "Started packet capture on interface: " << interface << "\n";
+            std::cout << "Started packet capture on interface: " << iface << "\n";
             std::cout << "Press Ctrl+C to stop capture.\n";
             return 0;
         } else {

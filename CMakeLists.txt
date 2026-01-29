@@ -215,8 +215,7 @@ set(HTTP_SOURCES
 )
 
 set(MOBILE_SOURCES
-    # Disabled - requires external libraries (nlohmann/json, jwt-cpp)
-    # src/mobile/mobile_api.cpp
+    src/mobile/mobile_api.cpp
 )
 
 set(CONTAINERS_SOURCES
@@ -270,6 +269,7 @@ add_executable(customos-shell
     ${ANALYTICS_SOURCES}
     ${REMOTE_SOURCES}
     ${CONTAINERS_SOURCES}
+    ${MOBILE_SOURCES}
     ${NOTES_SOURCES}
     ${MONITOR_SOURCES}
     ${ENV_SOURCES}
