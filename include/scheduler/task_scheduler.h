@@ -38,9 +38,10 @@ enum class TaskStatus {
 // Scheduled task
 struct ScheduledTask {
     std::string id;
+    std::string user;        // Associated user
     std::string title;
     std::string description;
-    std::string command;  // Command to execute
+    std::string command;     // Command to execute
     time_t scheduled_time;
     RecurrenceType recurrence;
     TaskPriority priority;
@@ -49,11 +50,13 @@ struct ScheduledTask {
     time_t last_run;
     std::string category;
     bool enabled;
+    int execution_count = 0;
 };
 
 // Reminder
 struct Reminder {
     std::string id;
+    std::string user;        // Associated user
     std::string title;
     std::string message;
     time_t reminder_time;

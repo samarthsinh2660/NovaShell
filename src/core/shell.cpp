@@ -6,6 +6,7 @@
 #include "vault/password_manager.h"
 #include "network/packet_analyzer.h"
 #include "core/tab_completion.h"
+#include "ai/ai_module.h"
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -65,6 +66,12 @@ bool Shell::initialize() {
             return false;
         }
 
+        // Initialize AI modules
+        if (!ai::initialize_ai_modules()) {
+            LOG_ERROR("Failed to initialize AI modules");
+            // Don't fail startup if AI modules fail - they can be initialized later
+        }
+
         // Load configuration
         load_configuration();
 
@@ -83,10 +90,10 @@ bool Shell::initialize() {
 
 void Shell::display_welcome() {
     std::cout << "\n";
-    std::cout << "=======================================================\n";
-    std::cout << "                 NovaShell v1.0.0                      \n";
-    std::cout << "         Advanced Command Line Interface               \n";
-    std::cout << "=======================================================\n";
+    std::cout << "=====================================\n";
+    std::cout << "        N O V A S H E L L  v1.5\n";
+    std::cout << "  Your AI Terminal Assistant for Life & Code\n";
+    std::cout << "=====================================\n";
     std::cout << "\n";
     std::cout << "Type 'help' for available commands or 'exit' to quit.\n";
     std::cout << "\n";
@@ -164,6 +171,14 @@ bool Shell::execute_command(const std::string& command) {
 
     // Process command
     auto result = command_processor_->process(command);
+
+    // Learn from successful command execution for better future suggestions
+    if (result.success) {
+        static std::string previous_command;
+        core::TabCompletion::instance().learn_from_command(command, previous_command);
+        core::TabCompletion::instance().add_to_history(command);
+        previous_command = command;
+    }
 
     // Display output
     if (!result.output.empty()) {
@@ -256,9 +271,29 @@ std::string Shell::read_input_with_completion() {
         else if (ch == '\t') {  // Tab key pressed
             if (completion_matches.empty()) {
                 auto matches = core::TabCompletion::instance().complete(current_line, cursor_pos);
+
+                // Separate AI/learning suggestions for special display
+                std::vector<std::string> ai_matches;
+                std::vector<std::string> learning_matches;
+                std::vector<std::string> regular_matches;
+
                 for (const auto& match : matches) {
-                    completion_matches.push_back(match.text);
+                    if (match.description.find("🤖 AI") != std::string::npos) {
+                        ai_matches.push_back(match.text);
+                    } else if (match.description.find("📊 Learned") != std::string::npos ||
+                             match.description.find("🔄 Workflow") != std::string::npos ||
+                             match.description.find("⏰ Time-based") != std::string::npos) {
+                        learning_matches.push_back(match.text);
+                    } else {
+                        regular_matches.push_back(match.text);
+                    }
                 }
+
+                // Combine in priority order: AI first, then learning, then regular
+                completion_matches.insert(completion_matches.end(), ai_matches.begin(), ai_matches.end());
+                completion_matches.insert(completion_matches.end(), learning_matches.begin(), learning_matches.end());
+                completion_matches.insert(completion_matches.end(), regular_matches.begin(), regular_matches.end());
+
                 completion_index = 0;
             }
 
@@ -273,13 +308,56 @@ std::string Shell::read_input_with_completion() {
                     std::cout << current_line;
                     std::cout.flush();
                 } else {
-                    // Multiple matches - show options below
+                    // Multiple matches - show categorized options below
                     std::cout << "\n";  // Move to next line
-                    for (size_t i = 0; i < completion_matches.size() && i < 10; ++i) {
-                        if (i > 0) std::cout << "  ";
-                        std::cout << completion_matches[i];
+
+                    // Show AI suggestions first with special highlighting
+                    auto matches = core::TabCompletion::instance().complete(current_line, cursor_pos);
+                    std::vector<std::string> ai_suggestions, learning_suggestions, regular_suggestions;
+
+                    for (const auto& match : matches) {
+                        if (match.description.find("🤖 AI") != std::string::npos) {
+                            ai_suggestions.push_back(match.text);
+                        } else if (match.description.find("📊") != std::string::npos ||
+                                 match.description.find("🔄") != std::string::npos ||
+                                 match.description.find("⏰") != std::string::npos) {
+                            learning_suggestions.push_back(match.text);
+                        } else {
+                            regular_suggestions.push_back(match.text);
+                        }
                     }
-                    std::cout << "\n" << prompt_ << current_line;  // Back to current line
+
+                    // Display AI suggestions prominently
+                    if (!ai_suggestions.empty()) {
+                        std::cout << "🤖 AI Suggestions: ";
+                        for (size_t i = 0; i < ai_suggestions.size() && i < 3; ++i) {
+                            if (i > 0) std::cout << "  ";
+                            std::cout << ai_suggestions[i];
+                        }
+                        std::cout << "\n";
+                    }
+
+                    // Display learning suggestions
+                    if (!learning_suggestions.empty()) {
+                        std::cout << "🧠 Smart Suggestions: ";
+                        for (size_t i = 0; i < learning_suggestions.size() && i < 3; ++i) {
+                            if (i > 0) std::cout << "  ";
+                            std::cout << learning_suggestions[i];
+                        }
+                        std::cout << "\n";
+                    }
+
+                    // Display regular suggestions
+                    if (!regular_suggestions.empty()) {
+                        std::cout << "📋 Standard: ";
+                        for (size_t i = 0; i < regular_suggestions.size() && i < 5; ++i) {
+                            if (i > 0) std::cout << "  ";
+                            std::cout << regular_suggestions[i];
+                        }
+                        std::cout << "\n";
+                    }
+
+                    std::cout << prompt_ << current_line;  // Back to current line
                     std::cout.flush();
                 }
 
@@ -442,11 +520,37 @@ void Shell::show_help() {
     std::cout << "  vault    - Password management" << std::endl;
     std::cout << "  net      - Network analysis tools" << std::endl;
     std::cout << "  monitor  - System monitoring" << std::endl;
-    std::cout << "  ai       - AI-powered suggestions" << std::endl;
+    std::cout << "  ai       - AI-powered coding assistance (v1.5)" << std::endl;
     std::cout << "  note     - Note and snippet management" << std::endl;
     std::cout << "  env      - Environment management" << std::endl;
     std::cout << std::endl;
-    std::cout << "For detailed help on any command, type: help <command>" << std::endl;
+    std::cout << "🤖 AI Features (NovaShell v1.5):" << std::endl;
+    std::cout << "=================================" << std::endl;
+    std::cout << "NovaShell v1.5 introduces revolutionary AI-powered coding assistance!" << std::endl;
+    std::cout << std::endl;
+    std::cout << "🚀 Getting Started with AI:" << std::endl;
+    std::cout << "1. Get Gemini API key: https://makersuite.google.com/app/apikey" << std::endl;
+    std::cout << "2. Initialize AI: ai-init YOUR_API_KEY" << std::endl;
+    std::cout << "3. Start coding with AI assistance!" << std::endl;
+    std::cout << std::endl;
+    std::cout << "🎯 AI Command Categories:" << std::endl;
+    std::cout << "  🧠 Understanding: ai-interpret, ai-explain" << std::endl;
+    std::cout << "  📋 Planning:      ai-plan, ai-project" << std::endl;
+    std::cout << "  🔧 Development:   ai-generate, ai-edit, ai-test" << std::endl;
+    std::cout << "  🐛 Debugging:     ai-debug, ai-analyze" << std::endl;
+    std::cout << "  📊 Quality:       ai-review, ai-context" << std::endl;
+    std::cout << "  🎓 Learning:      ai-help, ai-explain" << std::endl;
+    std::cout << std::endl;
+    std::cout << "💡 Popular AI Commands:" << std::endl;
+    std::cout << "  ai-interpret \"remind me to commit nightly\"  # Natural language → commands" << std::endl;
+    std::cout << "  ai-plan \"deploy my app\"                    # Create automation plans" << std::endl;
+    std::cout << "  ai-generate function cpp \"binary search\"   # Generate code" << std::endl;
+    std::cout << "  ai-analyze main.cpp                          # Code analysis" << std::endl;
+    std::cout << "  ai-debug \"segmentation fault\"               # Debug assistance" << std::endl;
+    std::cout << "  ai-help \"how to implement quicksort\"        # Interactive tutoring" << std::endl;
+    std::cout << std::endl;
+    std::cout << "📖 For detailed documentation, see COMMAND_REFERENCE.md" << std::endl;
+    std::cout << "🔗 NovaShell v1.5 makes you a 10x more productive developer!" << std::endl;
     std::cout << std::endl;
 }
 

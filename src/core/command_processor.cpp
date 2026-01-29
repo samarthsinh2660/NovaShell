@@ -1,33 +1,56 @@
 #include "core/command_processor.h"
-#include "core/command_registry.h"
 #include "auth/authentication.h"
+#include "database/internal_db.h"
 #include "vfs/virtual_filesystem.h"
 #include "vault/password_manager.h"
+#include "monitor/system_monitor.h"
+#include "scheduler/task_scheduler.h"
+#include "p2p/file_sharing.h"
+#include "notes/snippet_manager.h"
 #include "git/git_manager.h"
+#include "logging/logger.h"
+#include "ai/command_suggester.h"
+#include "ai/ai_module.h"             // AI features
 #include "network/packet_analyzer.h"
 #include "containers/container_manager.h"
-#include "monitor/system_monitor.h"
 #include "plugins/plugin_manager.h"
 #include "scripting/script_engine.h"
-#include "logging/logger.h"
-#include "notes/snippet_manager.h"
-#include "scheduler/task_scheduler.h"
-#include "database/db_manager.h"
-#include "p2p/file_sharing.h"
-#include "ai/command_suggester.h"  // Temporarily disabled - requires libcurl
+#include "remote/remote_desktop.h"
 #include "remote/ssh_server.h"
 #include "ui/theme_manager.h"
 // #include "voice/voice_commander.h"  // Temporarily disabled
 #include "analytics/dashboard.h"     // Analytics dashboard
+#include "analytics/performance_analytics.h"  // Performance analytics
 #include "env/environment_manager.h"
 #include <sstream>
 #include <iostream>
 #include <algorithm>
 #include <filesystem>
 #include <iomanip>
+#include <fstream>
 #ifdef _WIN32
 #include <conio.h> // For Windows password input
+#undef ERROR  // Avoid conflict with Windows ERROR macro
 #endif
+
+// Helper function to split strings
+std::vector<std::string> split_string(const std::string& str, char delimiter) {
+    std::vector<std::string> tokens;
+    std::stringstream ss(str);
+    std::string token;
+    while (std::getline(ss, token, delimiter)) {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
+
+// Namespace aliases for convenience
+namespace network = customos::network;
+namespace containers = customos::containers;
+namespace plugins = customos::plugins;
+namespace scripting = customos::scripting;
+namespace analytics = customos::analytics;
+namespace ai = customos::ai;
 
 namespace customos {
 namespace core {
@@ -62,6 +85,8 @@ CommandProcessor::~CommandProcessor() = default;
 
 bool CommandProcessor::initialize() {
     register_builtin_commands();
+    register_scheduler_commands();  // Add scheduler commands
+    register_ai_commands();         // Add AI commands
     return true;
 }
 
@@ -278,24 +303,39 @@ void CommandProcessor::register_builtin_commands() {
         }
         else if (arg == "8" || arg == "scheduler" || arg == "task") {
             show_category_help("⏰ Task Scheduling", {
-                {"scheduler-init", "Initialize the task scheduler"},
-                {"task-schedule <title> <command> <minutes>", "Schedule a command to run after specified minutes"},
+                {"task-schedule <title> <command> <time_t> [daily|weekly|monthly]", "Schedule a task to run at a specific time"},
                 {"task-list [category]", "List scheduled tasks"},
                 {"task-cancel <task_id>", "Cancel a scheduled task"},
-                {"task-run <task_id>", "Execute a scheduled task immediately"},
-                {"remind-add <title> <minutes>", "Set a reminder for specified minutes from now"},
-                {"remind-list", "Show active reminders"}
+                {"remind <title> <message> <minutes>", "Set a reminder for specified minutes from now"},
+                {"remind-list", "Show active reminders"},
+                {"remind-dismiss <reminder_id>", "Dismiss a reminder"}
             });
         }
         else if (arg == "9" || arg == "ai") {
             show_category_help("🤖 AI Features", {
-                {"ai-init <api_key>", "Initialize AI suggestions with Gemini API key"},
-                {"ai-suggest [context]", "Get AI-powered command suggestions"}
+                {"ai-init <api_key>", "Initialize AI features with Gemini API key"},
+                {"ai-interpret <text>", "Convert natural language to shell commands"},
+                {"code-analyze <file>", "Analyze code for bugs, style, and improvements"},
+                {"code-generate <type> <lang> <desc>", "Generate code snippets using AI"},
+                {"context-remember <cmd> [ctx]", "Remember context for future AI interactions"},
+                {"context-recall [query]", "Recall remembered context and commands"},
+                {"task-plan <goal>", "Plan multi-step tasks using AI"},
+                {"file-summarize <file> [type]", "Summarize file content using AI"},
+                {"smart-search <query> [type]", "Search across files and knowledge using AI"}
             });
         }
         else if (arg == "10" || arg == "remote" || arg == "ssh") {
             show_category_help("🌐 Remote Access", {
-                {"ssh-start [port]", "Start SSH server for remote connections"},
+                {"remote-desktop-start [port]", "Start remote desktop server for full desktop access"},
+                {"remote-desktop-sessions", "Show active remote desktop sessions"},
+                {"remote-desktop-terminals", "List available terminal windows for remote access"},
+                {"remote-desktop-switch <session_id>", "Switch focus to specific terminal session"},
+                {"remote-desktop-capture-terminal <session_id>", "Capture screen of specific terminal"},
+                {"remote-desktop-displays", "List available displays/monitors"},
+                {"remote-desktop-fullscreen", "Capture complete desktop across all monitors"},
+                {"remote-desktop-set-display <name>", "Set active display for remote desktop"},
+                {"remote-desktop-windows", "List all visible windows for remote access"},
+                {"ssh-start [port]", "Start SSH server for remote terminal access"},
                 {"ssh-stop", "Stop the SSH server"},
                 {"ssh-connections", "Show active SSH connections"}
             });
@@ -1379,6 +1419,7 @@ void CommandProcessor::register_builtin_commands() {
             std::cout << "Failed to initialize container runtime. Make sure Docker/Podman is running.\n";
             return 1;
         }
+        return 0;  // Add missing return statement
     };
     registry_->register_command(docker_init_cmd);
 
@@ -1473,6 +1514,7 @@ void CommandProcessor::register_builtin_commands() {
             std::cout << "Failed to create container.\n";
             return 1;
         }
+        return 0;  // Add missing return statement
     };
     registry_->register_command(docker_run_cmd);
 
@@ -1850,35 +1892,37 @@ void CommandProcessor::register_builtin_commands() {
         std::cout << "Enter note content (press Enter twice to finish):\n";
         std::string content;
         std::string line;
+        std::string last_line;
         while (std::getline(std::cin, line)) {
-            if (line.empty() && !content.empty()) break;
-            if (!content.empty()) content += "\n";
-            content += line;
+            if (line.empty() && last_line.empty()) {
+                break;
+            }
+            if (!line.empty()) {
+                content += line + "\n";
+            }
+            last_line = line;
         }
 
-        std::cout << "Category (optional): ";
-        std::string category;
-        std::getline(std::cin, category);
-
-        std::cout << "Tags (comma-separated, optional): ";
+        // Ask for tags (optional)
+        std::cout << "Enter tags (comma-separated, or press Enter to skip): ";
         std::string tags_input;
         std::getline(std::cin, tags_input);
 
         notes::Tags tags;
         if (!tags_input.empty()) {
-            std::stringstream ss(tags_input);
-            std::string tag;
-            while (std::getline(ss, tag, ',')) {
-                // Trim whitespace
-                tag.erase(tag.begin(), std::find_if(tag.begin(), tag.end(), [](int ch) {
-                    return !std::isspace(ch);
-                }));
+            auto tags_vector = split_string(tags_input, ',');
+            for (auto tag : tags_vector) {
                 tag.erase(std::find_if(tag.rbegin(), tag.rend(), [](int ch) {
                     return !std::isspace(ch);
                 }).base(), tag.end());
                 if (!tag.empty()) tags.push_back(tag);
             }
         }
+
+        // Ask for category (optional)
+        std::cout << "Enter category (or press Enter to skip): ";
+        std::string category;
+        std::getline(std::cin, category);
 
         std::string note_id = notes::SnippetManager::instance().add_note(title, content, tags, category);
         if (!note_id.empty()) {
@@ -2703,62 +2747,232 @@ void CommandProcessor::register_builtin_commands() {
     };
     registry_->register_command(p2p_share_cmd);
 
-    // AI commands - Temporarily disabled (requires libcurl)
+    // AI Task Flow Planner (Command Chaining & Automation) - Temporarily disabled
     /*
-    CommandInfo ai_suggest_cmd;
-    ai_suggest_cmd.name = "ai-suggest";
-    ai_suggest_cmd.description = "Get AI-powered command suggestions";
-    ai_suggest_cmd.usage = "ai-suggest [context]";
-    ai_suggest_cmd.handler = [](const CommandContext& ctx) -> int {
+    CommandInfo ai_plan_cmd;
+    ai_plan_cmd.name = "ai-plan";
+    ai_plan_cmd.description = "Create multi-step automation plan from goal";
+    ai_plan_cmd.usage = "ai-plan <goal>";
+    ai_plan_cmd.handler = [](const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
-            std::cout << "You must be logged in to use AI suggestions.\n";
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: ai-plan <goal>\n";
+            std::cout << "Example: ai-plan \"prepare my workspace for deployment\"\n";
             return 1;
         }
 
         if (!ai::CommandSuggester::instance().is_initialized()) {
-            std::cout << "AI suggestions not initialized. Use 'ai-init <api_key>' first.\n";
+            std::cout << "AI features require an API key.\n";
+            std::cout << "Use 'ai-init <your_gemini_api_key>' to set up AI.\n";
             return 1;
         }
 
-        ai::SuggestionContext context;
-        context.current_user = auth::Authentication::instance().get_current_user();
-        context.current_directory = "/"; // Could be improved to get actual working directory
-        context.partial_input = ctx.args.empty() ? "" : ctx.args[0];
+        std::string goal = ctx.args[0];
+        for (size_t i = 1; i < ctx.args.size(); ++i) {
+            goal += " " + ctx.args[i];
+        }
 
-        // Get suggestions
-        auto suggestions = ai::CommandSuggester::instance().suggest(context);
+        // TODO: Implement TaskPlanner
+        std::vector<std::string> plan_steps = {
+            "Step 1: Analyze requirements",
+            "Step 2: Design solution",
+            "Step 3: Implement changes",
+            "Step 4: Test implementation",
+            "Step 5: Deploy solution"
+        };
 
-        if (suggestions.empty()) {
-            std::cout << "No AI suggestions available.\n";
+        std::cout << "📋 AI Task Plan:\n";
+        std::cout << "\"" << goal << "\"\n\n";
+
+        for (size_t i = 0; i < plan_steps.size(); ++i) {
+            std::cout << (i + 1) << ". " << plan_steps[i] << "\n";
+        }
+
+        std::cout << "\n🚀 Execute plan with: ai-execute-plan \"" << goal << "\"\n";
+        return 0;
+    };
+    registry_->register_command(ai_plan_cmd);
+    */
+
+    // AI Context & Memory - Temporarily disabled
+    /*
+    CommandInfo ai_context_cmd;
+    ai_context_cmd.name = "ai-context";
+    ai_context_cmd.description = "Show AI memory and recent context";
+    ai_context_cmd.usage = "ai-context [query]";
+    ai_context_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            // Show current context
+            std::cout << "🧠 AI Context Memory:\n";
+            std::cout << "====================\n";
+            std::cout << "Context memory feature coming soon...\n";
             return 0;
         }
 
-        std::cout << "🤖 AI Command Suggestions:\n";
-        std::cout << "=========================\n";
-        for (size_t i = 0; i < std::min(suggestions.size(), size_t(5)); ++i) {
-            const auto& suggestion = suggestions[i];
-            std::cout << i + 1 << ". " << suggestion.command << "\n";
-            std::cout << "   " << suggestion.description << "\n";
-            std::cout << "   Confidence: " << (suggestion.confidence * 100) << "%\n\n";
+        // Search context
+        std::string query = ctx.args[0];
+        for (size_t i = 1; i < ctx.args.size(); ++i) {
+            query += " " + ctx.args[i];
         }
 
-        // Also show next command predictions
-        auto next_commands = ai::CommandSuggester::instance().predict_next_command();
-        if (!next_commands.empty()) {
-            std::cout << "🎯 Predicted Next Commands:\n";
-            std::cout << "===========================\n";
-            for (size_t i = 0; i < std::min(next_commands.size(), size_t(3)); ++i) {
-                std::cout << i + 1 << ". " << next_commands[i].command << "\n";
-            }
+        // TODO: Implement ContextEngine
+        std::vector<std::string> results = {
+            "Recent command: git status",
+            "Recent command: vault-get github.com",
+            "Recent command: ai-analyze main.cpp"
+        };
+
+        std::cout << "🔍 Context Search Results:\n";
+        std::cout << "\"" << query << "\"\n\n";
+
+        for (size_t i = 0; i < results.size() && i < 5; ++i) {
+            std::cout << (i + 1) << ". " << results[i] << "\n";
         }
+
         return 0;
     };
-    registry_->register_command(ai_suggest_cmd);
+    registry_->register_command(ai_context_cmd);
+    */
 
-    // AI initialization command
+    // AI Code Analyzer & Helper
+    CommandInfo ai_analyze_cmd;
+    ai_analyze_cmd.name = "ai-analyze";
+    ai_analyze_cmd.description = "Analyze code for bugs, issues, and improvements";
+    ai_analyze_cmd.usage = "ai-analyze <file_path> [task]";
+    ai_analyze_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: ai-analyze <file_path> [task]\n";
+            std::cout << "Tasks: analyze (default), explain, improve\n";
+            std::cout << "Example: ai-analyze main.cpp\n";
+            return 1;
+        }
+
+        if (!ai::CommandSuggester::instance().is_initialized()) {
+            std::cout << "AI features require an API key.\n";
+            std::cout << "Use 'ai-init <your_gemini_api_key>' to set up AI.\n";
+            return 1;
+        }
+
+        std::string filepath = ctx.args[0];
+        std::string task = ctx.args.size() > 1 ? ctx.args[1] : "analyze";
+
+        // Read file content (simplified - would need proper file reading)
+        std::ifstream file(filepath);
+        if (!file.is_open()) {
+            std::cout << "Could not open file: " << filepath << "\n";
+            return 1;
+        }
+
+        std::string code((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+
+        std::cout << "🔍 AI Code Analysis:\n";
+        std::cout << "===================\n";
+        std::cout << "File: " << filepath << "\n";
+        std::cout << "Task: " << task << "\n\n";
+
+        if (task == "analyze") {
+            auto result = ai::CodeAnalyzer::instance().analyze_file(filepath);
+            if (result.issues.empty()) {
+                std::cout << "✅ No issues found in the code.\n";
+                std::cout << "Overall Score: " << result.overall_score << "\n";
+            } else {
+                std::cout << "Overall Score: " << result.overall_score << "\n";
+                std::cout << "Issues found: " << result.issues.size() << "\n\n";
+                for (const auto& issue : result.issues) {
+                    std::cout << "⚠️  Line " << issue.line_number << ": " << issue.message << "\n";
+                    if (!issue.suggestion.empty()) {
+                        std::cout << "   💡 " << issue.suggestion << "\n";
+                    }
+                    std::cout << "\n";
+                }
+            }
+        } else if (task == "explain") {
+            std::string language = filepath.substr(filepath.find_last_of(".") + 1);
+            auto explanation = ai::CodeAnalyzer::instance().explain_code(code, language);
+            std::cout << "📖 Code Explanation:\n";
+            std::cout << "===================\n";
+            std::cout << "Summary: " << explanation.summary << "\n\n";
+            if (!explanation.key_concepts.empty()) {
+                std::cout << "Key Concepts:\n";
+                for (const auto& concept : explanation.key_concepts) {
+                    std::cout << "  - " << concept << "\n";
+                }
+                std::cout << "\n";
+            }
+            if (!explanation.complexity_analysis.empty()) {
+                std::cout << "Complexity: " << explanation.complexity_analysis << "\n";
+            }
+        } else if (task == "improve") {
+            auto review = ai::CodeAnalyzer::instance().review_code(code, filepath.substr(filepath.find_last_of(".") + 1));
+            std::cout << "💡 Code Review:\n";
+            std::cout << "================\n";
+            std::cout << "Overall Rating: " << review.overall_rating << "\n";
+            if (!review.summary.empty()) {
+                std::cout << "Summary: " << review.summary << "\n\n";
+            }
+            if (!review.critical_issues.empty()) {
+                std::cout << "Critical Issues:\n";
+                for (const auto& issue : review.critical_issues) {
+                    std::cout << "  - " << issue.message << "\n";
+                }
+                std::cout << "\n";
+            }
+            if (!review.suggestions.empty()) {
+                std::cout << "Suggestions:\n";
+                for (const auto& issue : review.suggestions) {
+                    std::cout << "  - " << issue.message << "\n";
+                }
+                std::cout << "\n";
+            }
+        } else if (task == "debug") {
+            std::cout << "Enter error message: ";
+            std::string error_msg;
+            std::getline(std::cin, error_msg);
+
+            ai::CodeAnalyzer::DebugRequest debug_req;
+            debug_req.error_message = error_msg;
+            debug_req.code_snippet = code;
+            debug_req.language = filepath.substr(filepath.find_last_of(".") + 1);
+
+            auto solution = ai::CodeAnalyzer::instance().debug_code(debug_req);
+            std::cout << "🔧 Debug Solution:\n";
+            std::cout << "==================\n";
+            std::cout << "Root Cause: " << solution.root_cause << "\n\n";
+            std::cout << "Confidence: " << solution.confidence << "\n";
+            if (!solution.fixed_code.empty()) {
+                std::cout << "\nFixed Code:\n```cpp\n" << solution.fixed_code << "\n```\n";
+            }
+        } else {
+                std::cout << "💡 Improvement Suggestions:\n";
+                for (size_t i = 0; i < suggestions.size(); ++i) {
+                    std::cout << (i + 1) << ". " << suggestions[i] << "\n";
+                }
+            }
+        }
+
+        return 0;
+    };
+    registry_->register_command(ai_analyze_cmd);
+
+    // AI API Key Management & Initialization
     CommandInfo ai_init_cmd;
     ai_init_cmd.name = "ai-init";
-    ai_init_cmd.description = "Initialize AI suggestions with API key";
+    ai_init_cmd.description = "Initialize AI features with Gemini API key";
     ai_init_cmd.usage = "ai-init <gemini_api_key>";
     ai_init_cmd.handler = [](const CommandContext& ctx) -> int {
         if (!auth::Authentication::instance().is_logged_in()) {
@@ -2767,24 +2981,1255 @@ void CommandProcessor::register_builtin_commands() {
         }
 
         if (ctx.args.empty()) {
-            std::cout << "Usage: ai-init <gemini_api_key>\n";
-            std::cout << "Get your API key from: https://makersuite.google.com/app/apikey\n";
-            return 1;
+            // Show current status
+            std::cout << "🤖 AI Status:\n";
+            std::cout << "============\n";
+            std::cout << "API Key: " << (ai::CommandSuggester::instance().is_initialized() ? "✅ Configured" : "❌ Not set") << "\n";
+            std::cout << "AI Client: " << (ai::GeminiClient::instance().is_initialized() ? "✅ Ready" : "❌ Not initialized") << "\n";
+            std::cout << "\nAvailable AI Commands:\n";
+            std::cout << "  ai-interpret  - Natural language to commands\n";
+            std::cout << "  ai-plan       - Create task automation plans\n";
+            std::cout << "  ai-context    - Memory and context recall\n";
+            std::cout << "  ai-analyze    - Code analysis and explanation\n";
+            std::cout << "  ai-explain    - Technical concept explanations\n";
+
+            if (!ai::CommandSuggester::instance().is_initialized()) {
+                std::cout << "\nTo set up AI:\n";
+                std::cout << "1. Get Gemini API key from: https://makersuite.google.com/app/apikey\n";
+                std::cout << "2. Run: ai-init YOUR_API_KEY\n";
+            }
+            return 0;
         }
 
-        if (ai::CommandSuggester::instance().initialize(ctx.args[0])) {
-            std::cout << "AI suggestions initialized successfully!\n";
-            std::cout << "You can now use 'ai-suggest' to get intelligent command suggestions.\n";
-            ai::CommandSuggester::instance().enable(true);
+        std::string api_key = ctx.args[0];
+
+        if (ai::CommandSuggester::instance().initialize(api_key)) {
+            std::cout << "✅ AI initialized successfully!\n";
+            std::cout << "API key stored securely.\n";
+            std::cout << "You can now use all AI features:\n";
+            std::cout << "  ai-interpret, ai-plan, ai-context, ai-analyze, ai-explain\n";
             return 0;
         } else {
-            std::cout << "Failed to initialize AI suggestions.\n";
-            std::cout << "Please check your API key and internet connection.\n";
+            std::cout << "❌ Failed to initialize AI.\n";
+            std::cout << "Please check your API key and try again.\n";
+            std::cout << "Get your key from: https://makersuite.google.com/app/apikey\n";
             return 1;
         }
     };
     registry_->register_command(ai_init_cmd);
-    */
+
+    // AI Code Generation
+    CommandInfo ai_generate_cmd;
+    ai_generate_cmd.name = "ai-generate";
+    ai_generate_cmd.description = "Generate code snippets, functions, classes, or project structures";
+    ai_generate_cmd.usage = "ai-generate <type> <language> <description> [options]";
+    ai_generate_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.size() < 3) {
+            std::cout << "Usage: ai-generate <type> <language> <description> [options]\n";
+            std::cout << "Types: function, class, module, test, boilerplate, project\n";
+            std::cout << "Languages: cpp, python, java, javascript, go, rust, etc.\n";
+            std::cout << "Examples:\n";
+            std::cout << "  ai-generate function cpp \"sort vector of integers using quicksort\"\n";
+            std::cout << "  ai-generate class python \"database connection manager\"\n";
+            std::cout << "  ai-generate test cpp \"unit tests for calculator class\"\n";
+            std::cout << "  ai-generate project nodejs \"REST API for task management\"\n";
+            return 1;
+        }
+
+        if (!ai::CommandSuggester::instance().is_initialized()) {
+            std::cout << "AI features require an API key.\n";
+            std::cout << "Use 'ai-init <your_gemini_api_key>' to set up AI.\n";
+            return 1;
+        }
+
+        ai::CodeAnalyzer::CodeGenerationRequest request;
+        request.type = ctx.args[0];
+        request.language = ctx.args[1];
+        request.description = ctx.args[2];
+
+        // Parse additional options
+        for (size_t i = 3; i < ctx.args.size(); ++i) {
+            if (ctx.args[i].find("=") != std::string::npos) {
+                auto parts = split_string(ctx.args[i], "=");
+                if (parts.size() == 2) {
+                    request.parameters[parts[0]] = parts[1];
+                }
+            } else {
+                request.requirements.push_back(ctx.args[i]);
+            }
+        }
+
+        std::cout << "🤖 Generating " << request.type << " in " << request.language << "...\n";
+        std::cout << "Description: " << request.description << "\n\n";
+
+        std::string generated_code = ai::CodeAnalyzer::instance().generate_code(request);
+
+        if (generated_code.empty()) {
+            std::cout << "Failed to generate code. Please try again.\n";
+            return 1;
+        }
+
+        std::cout << "```" << request.language << "\n";
+        std::cout << generated_code << "\n";
+        std::cout << "```\n\n";
+
+        std::cout << "💡 Copy this code to use it in your project!\n";
+        return 0;
+    };
+    registry_->register_command(ai_generate_cmd);
+
+    // AI Code Editing & Refactoring
+    CommandInfo ai_edit_cmd;
+    ai_edit_cmd.name = "ai-edit";
+    ai_edit_cmd.description = "Edit and refactor existing code files with AI assistance";
+    ai_edit_cmd.usage = "ai-edit <filepath> <operation> [target] [options]";
+    ai_edit_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.size() < 2) {
+            std::cout << "Usage: ai-edit <filepath> <operation> [target] [options]\n";
+            std::cout << "Operations: refactor, optimize, fix, improve, document, secure\n";
+            std::cout << "Examples:\n";
+            std::cout << "  ai-edit main.cpp refactor \"sort_function\" --style=clean\n";
+            std::cout << "  ai-edit utils.py optimize performance\n";
+            std::cout << "  ai-edit app.js document --format=jsdoc\n";
+            return 1;
+        }
+
+        if (!ai::CommandSuggester::instance().is_initialized()) {
+            std::cout << "AI features require an API key.\n";
+            std::cout << "Use 'ai-init <your_gemini_api_key>' to set up AI.\n";
+            return 1;
+        }
+
+        ai::CodeAnalyzer::CodeEditRequest request;
+        request.filepath = ctx.args[0];
+        request.operation = ctx.args[1];
+
+        if (ctx.args.size() > 2) {
+            request.target = ctx.args[2];
+        }
+
+        // Parse options
+        for (size_t i = 3; i < ctx.args.size(); ++i) {
+            if (ctx.args[i].find("=") != std::string::npos) {
+                auto parts = split_string(ctx.args[i], "=");
+                if (parts.size() == 2) {
+                    request.options[parts[0]] = parts[1];
+                }
+            }
+        }
+
+        std::cout << "🔧 AI " << request.operation << " for " << request.filepath << "...\n";
+
+        auto result = ai::CodeAnalyzer::instance().edit_code(request);
+
+        if (!result.success) {
+            std::cout << "Failed to edit code. Please check the file path and try again.\n";
+            return 1;
+        }
+
+        std::cout << "✅ Code " << request.operation << " completed!\n\n";
+        std::cout << "Changes made:\n";
+        for (const auto& change : result.changes_made) {
+            std::cout << "  • " << change << "\n";
+        }
+        std::cout << "\nExplanation: " << result.explanation << "\n\n";
+
+        if (!result.backup_file.empty()) {
+            std::cout << "📁 Backup created: " << result.backup_file << "\n\n";
+        }
+
+        std::cout << "📝 Modified code:\n";
+        std::cout << result.edited_code << "\n";
+        return 0;
+    };
+    registry_->register_command(ai_edit_cmd);
+
+    // AI Debugging Assistant
+    CommandInfo ai_debug_cmd;
+    ai_debug_cmd.name = "ai-debug";
+    ai_debug_cmd.description = "Debug code errors and provide solutions";
+    ai_debug_cmd.usage = "ai-debug <error_message> [code_file] [language]";
+    ai_debug_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: ai-debug <error_message> [code_file] [language]\n";
+            std::cout << "Examples:\n";
+            std::cout << "  ai-debug \"segmentation fault in main.cpp\"\n";
+            std::cout << "  ai-debug \"TypeError: cannot read property\" app.js javascript\n";
+            return 1;
+        }
+
+        if (!ai::CommandSuggester::instance().is_initialized()) {
+            std::cout << "AI features require an API key.\n";
+            std::cout << "Use 'ai-init <your_gemini_api_key>' to set up AI.\n";
+            return 1;
+        }
+
+        ai::CodeAnalyzer::DebugRequest request;
+        request.error_message = ctx.args[0];
+
+        if (ctx.args.size() > 1) {
+            request.code_snippet = ctx.args[1];
+        }
+
+        if (ctx.args.size() > 2) {
+            request.language = ctx.args[2];
+        } else {
+            // Try to detect language from file extension
+            if (!request.code_snippet.empty() && request.code_snippet.find(".") != std::string::npos) {
+                std::string ext = request.code_snippet.substr(request.code_snippet.find_last_of(".") + 1);
+                if (ext == "cpp" || ext == "cc" || ext == "cxx") request.language = "cpp";
+                else if (ext == "py") request.language = "python";
+                else if (ext == "js") request.language = "javascript";
+                else if (ext == "java") request.language = "java";
+                else if (ext == "go") request.language = "go";
+                else if (ext == "rs") request.language = "rust";
+            }
+        }
+
+        std::cout << "🐛 AI Debugging: " << request.error_message << "\n";
+        std::cout << "Analyzing...\n\n";
+
+        auto solution = ai::CodeAnalyzer::instance().debug_code(request);
+
+        std::cout << "🎯 Root Cause: " << solution.root_cause << "\n\n";
+        std::cout << "📖 Explanation: " << solution.explanation << "\n\n";
+
+        if (!solution.fixed_code.empty()) {
+            std::cout << "🔧 Fixed Code:\n```" << request.language << "\n";
+            std::cout << solution.fixed_code << "\n```\n\n";
+        }
+
+        if (!solution.alternative_solutions.empty()) {
+            std::cout << "💡 Alternative Solutions:\n";
+            for (size_t i = 0; i < solution.alternative_solutions.size(); ++i) {
+                std::cout << "  " << (i + 1) << ". " << solution.alternative_solutions[i] << "\n";
+            }
+            std::cout << "\n";
+        }
+
+        if (!solution.prevention_tips.empty()) {
+            std::cout << "🛡️ Prevention Tips:\n";
+            for (const auto& tip : solution.prevention_tips) {
+                std::cout << "  • " << tip << "\n";
+            }
+            std::cout << "\n";
+        }
+
+        std::cout << "🎚️ Confidence: " << solution.confidence << "\n";
+        return 0;
+    };
+    registry_->register_command(ai_debug_cmd);
+
+    // AI Project Structure Generator
+    CommandInfo ai_project_cmd;
+    ai_project_cmd.name = "ai-project";
+    ai_project_cmd.description = "Generate complete project structures and boilerplate code";
+    ai_project_cmd.usage = "ai-project <type> <name> <language> [framework] [options]";
+    ai_project_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.size() < 3) {
+            std::cout << "Usage: ai-project <type> <name> <language> [framework] [options]\n";
+            std::cout << "Types: web, api, cli, lib, desktop, mobile\n";
+            std::cout << "Examples:\n";
+            std::cout << "  ai-project web blog-app javascript react\n";
+            std::cout << "  ai-project api task-manager python flask\n";
+            std::cout << "  ai-project cli file-utility cpp\n";
+            return 1;
+        }
+
+        if (!ai::CommandSuggester::instance().is_initialized()) {
+            std::cout << "AI features require an API key.\n";
+            std::cout << "Use 'ai-init <your_gemini_api_key>' to set up AI.\n";
+            return 1;
+        }
+
+        std::string project_type = ctx.args[0];
+        std::string project_name = ctx.args[1];
+        std::string language = ctx.args[2];
+        std::string framework = ctx.args.size() > 3 ? ctx.args[3] : "";
+
+        std::cout << "🏗️ AI Project Generator\n";
+        std::cout << "Creating " << project_type << " project: " << project_name << "\n";
+        std::cout << "Language: " << language;
+        if (!framework.empty()) std::cout << ", Framework: " << framework;
+        std::cout << "\n\n";
+
+        // Generate project structure using AI
+        ai::CodeAnalyzer::CodeGenerationRequest structure_request;
+        structure_request.type = "project";
+        structure_request.language = language;
+        structure_request.description = "Project structure for " + project_type + " application: " + project_name;
+        structure_request.parameters["project_type"] = project_type;
+        structure_request.parameters["framework"] = framework;
+
+        std::string project_structure = ai::CodeAnalyzer::instance().generate_code(structure_request);
+
+        if (project_structure.empty()) {
+            std::cout << "Failed to generate project structure. Please try again.\n";
+            return 1;
+        }
+
+        std::cout << "📁 Project Structure:\n";
+        std::cout << project_structure << "\n\n";
+
+        std::cout << "🚀 To create this project structure:\n";
+        std::cout << "1. Create directory: mkdir " << project_name << "\n";
+        std::cout << "2. Navigate: cd " << project_name << "\n";
+        std::cout << "3. Initialize: git init && [setup commands from above]\n";
+        std::cout << "4. Use ai-generate to create specific files as needed\n";
+
+        return 0;
+    };
+    registry_->register_command(ai_project_cmd);
+
+    // AI Code Review
+    CommandInfo ai_review_cmd;
+    ai_review_cmd.name = "ai-review";
+    ai_review_cmd.description = "Comprehensive AI code review with detailed feedback";
+    ai_review_cmd.usage = "ai-review <filepath> [focus_area]";
+    ai_review_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: ai-review <filepath> [focus_area]\n";
+            std::cout << "Focus areas: security, performance, maintainability, all\n";
+            std::cout << "Example: ai-review main.cpp security\n";
+            return 1;
+        }
+
+        if (!ai::CommandSuggester::instance().is_initialized()) {
+            std::cout << "AI features require an API key.\n";
+            std::cout << "Use 'ai-init <your_gemini_api_key>' to set up AI.\n";
+            return 1;
+        }
+
+        std::string filepath = ctx.args[0];
+        std::string focus_area = ctx.args.size() > 1 ? ctx.args[1] : "all";
+
+        std::cout << "🔍 AI Code Review: " << filepath << "\n";
+        std::cout << "Focus: " << focus_area << "\n";
+        std::cout << "Analyzing...\n\n";
+
+        // Read file content
+        std::ifstream file(filepath);
+        if (!file.is_open()) {
+            std::cout << "Could not open file: " << filepath << "\n";
+            return 1;
+        }
+
+        std::string code((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+
+        // Detect language
+        std::string language = "auto";
+        if (filepath.find(".") != std::string::npos) {
+            std::string ext = filepath.substr(filepath.find_last_of(".") + 1);
+            if (ext == "cpp" || ext == "cc" || ext == "cxx") language = "cpp";
+            else if (ext == "py") language = "python";
+            else if (ext == "js") language = "javascript";
+            else if (ext == "java") language = "java";
+            else if (ext == "go") language = "go";
+            else if (ext == "rs") language = "rust";
+        }
+
+        auto review_result = ai::CodeAnalyzer::instance().review_code(code, language);
+
+        std::cout << "📊 Overall Rating: " << review_result.overall_rating << "\n\n";
+
+        if (!review_result.critical_issues.empty()) {
+            std::cout << "🚨 Critical Issues:\n";
+            for (const auto& issue : review_result.critical_issues) {
+                std::cout << "  • " << issue.message << " (Line " << issue.line_number << ")\n";
+            }
+            std::cout << "\n";
+        }
+
+        if (!review_result.suggestions.empty()) {
+            std::cout << "💡 Suggestions:\n";
+            for (const auto& suggestion : review_result.suggestions) {
+                std::cout << "  • " << suggestion.message << " (Line " << suggestion.line_number << ")\n";
+            }
+            std::cout << "\n";
+        }
+
+        if (!review_result.security_concerns.empty()) {
+            std::cout << "🔒 Security Concerns:\n";
+            for (const auto& concern : review_result.security_concerns) {
+                std::cout << "  • " << concern << "\n";
+            }
+            std::cout << "\n";
+        }
+
+        if (!review_result.best_practices_violated.empty()) {
+            std::cout << "📋 Best Practices:\n";
+            for (const auto& practice : review_result.best_practices_violated) {
+                std::cout << "  • " << practice << "\n";
+            }
+            std::cout << "\n";
+        }
+
+        std::cout << "📈 Metrics:\n";
+        for (const auto& metric : review_result.metrics) {
+            std::cout << "  " << metric.first << ": " << metric.second << "\n";
+        }
+        std::cout << "\n";
+
+        std::cout << "📝 Summary: " << review_result.summary << "\n";
+
+        return 0;
+    };
+    registry_->register_command(ai_review_cmd);
+
+    // AI Test Generation
+    CommandInfo ai_test_cmd;
+    ai_test_cmd.name = "ai-test";
+    ai_test_cmd.description = "Generate comprehensive test cases for your code";
+    ai_test_cmd.usage = "ai-test <filepath> [test_framework] [test_types]";
+    ai_test_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: ai-test <filepath> [test_framework] [test_types]\n";
+            std::cout << "Test frameworks: gtest (cpp), pytest (python), jest (js), junit (java)\n";
+            std::cout << "Test types: unit, integration, edge_cases, performance\n";
+            std::cout << "Example: ai-test calculator.cpp gtest \"unit,edge_cases\"\n";
+            return 1;
+        }
+
+        if (!ai::CommandSuggester::instance().is_initialized()) {
+            std::cout << "AI features require an API key.\n";
+            std::cout << "Use 'ai-init <your_gemini_api_key>' to set up AI.\n";
+            return 1;
+        }
+
+        std::string filepath = ctx.args[0];
+
+        // Read file content
+        std::ifstream file(filepath);
+        if (!file.is_open()) {
+            std::cout << "Could not open file: " << filepath << "\n";
+            return 1;
+        }
+
+        std::string code((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+
+        // Detect language and default framework
+        std::string language = "auto";
+        std::string framework = "auto";
+
+        if (filepath.find(".") != std::string::npos) {
+            std::string ext = filepath.substr(filepath.find_last_of(".") + 1);
+            if (ext == "cpp" || ext == "cc" || ext == "cxx") {
+                language = "cpp";
+                framework = "gtest";
+            } else if (ext == "py") {
+                language = "python";
+                framework = "pytest";
+            } else if (ext == "js") {
+                language = "javascript";
+                framework = "jest";
+            } else if (ext == "java") {
+                language = "java";
+                framework = "junit";
+            } else if (ext == "go") {
+                language = "go";
+                framework = "testing";
+            } else if (ext == "rs") {
+                language = "rust";
+                framework = "built-in";
+            }
+        }
+
+        if (ctx.args.size() > 1) {
+            framework = ctx.args[1];
+        }
+
+        std::vector<std::string> test_types = {"unit", "integration", "edge_cases"};
+        if (ctx.args.size() > 2) {
+            test_types.clear();
+            auto types = split_string(ctx.args[2], ",");
+            for (const auto& type : types) {
+                test_types.push_back(type);
+            }
+        }
+
+        ai::CodeAnalyzer::TestGenerationRequest request;
+        request.code = code;
+        request.language = language;
+        request.test_framework = framework;
+        request.test_types = test_types;
+
+        std::cout << "🧪 AI Test Generation: " << filepath << "\n";
+        std::cout << "Framework: " << framework << "\n";
+        std::cout << "Test Types: ";
+        for (size_t i = 0; i < test_types.size(); ++i) {
+            if (i > 0) std::cout << ", ";
+            std::cout << test_types[i];
+        }
+        std::cout << "\n\n";
+
+        std::string test_code = ai::CodeAnalyzer::instance().generate_tests(request);
+
+        if (test_code.empty()) {
+            std::cout << "Failed to generate tests. Please try again.\n";
+            return 1;
+        }
+
+        std::cout << "📝 Generated Tests:\n```" << language << "\n";
+        std::cout << test_code << "\n```\n\n";
+
+        std::cout << "💡 Save this as a test file and run with your test framework!\n";
+        return 0;
+    };
+    registry_->register_command(ai_test_cmd);
+
+    // AI Interactive Coding Assistant
+    CommandInfo ai_help_cmd;
+    ai_help_cmd.name = "ai-help";
+    ai_help_cmd.description = "Interactive AI coding assistance and tutoring";
+    ai_help_cmd.usage = "ai-help <question> [code_file] [skill_level]";
+    ai_help_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: ai-help <question> [code_file] [skill_level]\n";
+            std::cout << "Skill levels: 1-5 (1=beginner, 5=expert)\n";
+            std::cout << "Examples:\n";
+            std::cout << "  ai-help \"how to implement binary search\"\n";
+            std::cout << "  ai-help \"why is my loop slow\" main.cpp 3\n";
+            std::cout << "  ai-help \"explain async/await\" app.js 2\n";
+            return 1;
+        }
+
+        if (!ai::CommandSuggester::instance().is_initialized()) {
+            std::cout << "AI features require an API key.\n";
+            std::cout << "Use 'ai-init <your_gemini_api_key>' to set up AI.\n";
+            return 1;
+        }
+
+        ai::CodeAnalyzer::CodingAssistanceRequest request;
+        request.user_question = ctx.args[0];
+        request.skill_level = 3; // Default intermediate
+
+        if (ctx.args.size() > 1) {
+            std::string code_file = ctx.args[1];
+
+            // Read code file if provided
+            std::ifstream file(code_file);
+            if (file.is_open()) {
+                request.current_code = std::string((std::istreambuf_iterator<char>(file)),
+                                                  std::istreambuf_iterator<char>());
+            }
+
+            // Detect language from file
+            if (code_file.find(".") != std::string::npos) {
+                std::string ext = code_file.substr(code_file.find_last_of(".") + 1);
+                if (ext == "cpp" || ext == "cc" || ext == "cxx") request.language = "cpp";
+                else if (ext == "py") request.language = "python";
+                else if (ext == "js") request.language = "javascript";
+                else if (ext == "java") request.language = "java";
+                else if (ext == "go") request.language = "go";
+                else if (ext == "rs") request.language = "rust";
+            }
+        }
+
+        if (ctx.args.size() > 2) {
+            try {
+                request.skill_level = std::stoi(ctx.args[2]);
+                if (request.skill_level < 1) request.skill_level = 1;
+                if (request.skill_level > 5) request.skill_level = 5;
+            } catch (...) {
+                // Keep default
+            }
+        }
+
+        std::cout << "🤖 AI Coding Assistant\n";
+        std::cout << "Question: " << request.user_question << "\n";
+        if (!request.language.empty()) {
+            std::cout << "Language: " << request.language << "\n";
+        }
+        std::cout << "Skill Level: " << request.skill_level << "/5\n\n";
+
+        auto response = ai::CodeAnalyzer::instance().assist_coding(request);
+
+        std::cout << "💬 Answer:\n" << response.answer << "\n\n";
+
+        if (!response.suggested_code.empty()) {
+            std::cout << "💻 Suggested Code:\n```" << request.language << "\n";
+            std::cout << response.suggested_code << "\n```\n\n";
+        }
+
+        if (!response.next_steps.empty()) {
+            std::cout << "📋 Next Steps:\n";
+            for (size_t i = 0; i < response.next_steps.size(); ++i) {
+                std::cout << "  " << (i + 1) << ". " << response.next_steps[i] << "\n";
+            }
+            std::cout << "\n";
+        }
+
+        if (!response.learning_resources.empty()) {
+            std::cout << "📚 Learning Resources:\n";
+            for (const auto& resource : response.learning_resources) {
+                std::cout << "  • " << resource << "\n";
+            }
+            std::cout << "\n";
+        }
+
+        std::cout << "🎯 Confidence: " << response.confidence << "\n";
+        return 0;
+    };
+    registry_->register_command(ai_help_cmd);
+
+    // AI Completion Statistics
+    CommandInfo ai_completion_stats_cmd;
+    ai_completion_stats_cmd.name = "ai-completion-stats";
+    ai_completion_stats_cmd.description = "Show AI completion learning statistics and suggestions";
+    ai_completion_stats_cmd.usage = "ai-completion-stats";
+    ai_completion_stats_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to view AI completion statistics.\n";
+            return 1;
+        }
+
+        std::cout << "🤖 AI Completion Learning Statistics\n";
+        std::cout << "====================================\n\n";
+
+        // Get analytics summary from database
+        auto& db = database::InternalDB::instance();
+        auto analytics_summary = db.get_analytics_summary();
+
+        if (analytics_summary.empty()) {
+            std::cout << "No learning data available yet.\n";
+            std::cout << "Start using commands to build your personalized suggestions!\n";
+            return 0;
+        }
+
+        std::cout << "📊 Command Usage Patterns:\n";
+        std::cout << "==========================\n";
+        for (const auto& pair : analytics_summary) {
+            std::cout << "  " << pair.first.substr(14) << ": " << pair.second << " times\n";
+        }
+        std::cout << "\n";
+
+        std::cout << "💡 How AI Completion Works:\n";
+        std::cout << "===========================\n";
+        std::cout << "• 🤖 AI Suggestions: Powered by Google Gemini for intelligent predictions\n";
+        std::cout << "• 📊 Learned Patterns: Based on your command history and habits\n";
+        std::cout << "• 🔄 Workflow Sequences: Learns common command chains\n";
+        std::cout << "• ⏰ Time-Based: Suggests commands you typically use at certain times\n";
+        std::cout << "• 📈 Adaptive: Continuously improves as you use NovaShell\n\n";
+
+        std::cout << "🎯 To see AI suggestions in action:\n";
+        std::cout << "===================================\n";
+        std::cout << "1. Type a partial command (e.g., 'git')\n";
+        std::cout << "2. Press Tab to see categorized suggestions\n";
+        std::cout << "3. AI suggestions appear at the top with 🤖 icon\n";
+        std::cout << "4. Learning suggestions show patterns you've established\n\n";
+
+        std::cout << "🔧 Advanced Features:\n";
+        std::cout << "====================\n";
+        std::cout << "• Context-aware: Considers current directory and recent commands\n";
+        std::cout << "• Multi-modal: Combines AI, learning, and traditional completion\n";
+        std::cout << "• Caching: Fast response with 5-minute AI suggestion cache\n";
+        std::cout << "• Persistent: Learning data survives shell restarts\n";
+
+        return 0;
+    };
+    registry_->register_command(ai_completion_stats_cmd);
+
+    // Mobile Companion App commands
+    CommandInfo mobile_api_start_cmd;
+    mobile_api_start_cmd.name = "mobile-api-start";
+    mobile_api_start_cmd.description = "Start mobile companion app API server";
+    mobile_api_start_cmd.usage = "mobile-api-start [port]";
+    mobile_api_start_cmd.handler = [](const CommandContext& ctx) -> int {
+        static std::unique_ptr<mobile::MobileAPI> mobile_api;
+
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to start mobile API.\n";
+            return 1;
+        }
+
+        int port = 8080;
+        if (!ctx.args.empty()) {
+            try {
+                port = std::stoi(ctx.args[0]);
+            } catch (...) {
+                std::cout << "Invalid port number.\n";
+                return 1;
+            }
+        }
+
+        try {
+            mobile_api = std::make_unique<mobile::MobileAPI>();
+            if (mobile_api->initialize(port)) {
+                if (mobile_api->start()) {
+                    std::cout << "Mobile API server started on port " << port << "\n";
+                    std::cout << "Mobile apps can now connect to: http://localhost:" << port << "\n";
+                    return 0;
+                }
+            }
+            std::cout << "Failed to start mobile API server.\n";
+            return 1;
+        } catch (const std::exception& e) {
+            std::cout << "Error starting mobile API: " << e.what() << "\n";
+            return 1;
+        }
+    };
+    registry_->register_command(mobile_api_start_cmd);
+
+    CommandInfo mobile_api_stop_cmd;
+    mobile_api_stop_cmd.name = "mobile-api-stop";
+    mobile_api_stop_cmd.description = "Stop mobile companion app API server";
+    mobile_api_stop_cmd.usage = "mobile-api-stop";
+    mobile_api_stop_cmd.handler = [](const CommandContext& ctx) -> int {
+        // For now, just indicate that server stopping would be implemented
+        std::cout << "Mobile API server stop functionality would be implemented here.\n";
+        std::cout << "Note: Server would be gracefully stopped in production.\n";
+        return 0;
+    };
+    registry_->register_command(mobile_api_stop_cmd);
+
+    CommandInfo mobile_api_status_cmd;
+    mobile_api_status_cmd.name = "mobile-api-status";
+    mobile_api_status_cmd.description = "Show mobile API server status and statistics";
+    mobile_api_status_cmd.usage = "mobile-api-status";
+    mobile_api_status_cmd.handler = [](const CommandContext& ctx) -> int {
+        std::cout << "Mobile API Status\n";
+        std::cout << "=================\n\n";
+        std::cout << "🚧 Mobile API implementation in progress\n";
+        std::cout << "📱 Features planned:\n";
+        std::cout << "  • REST API for mobile app communication\n";
+        std::cout << "  • Secure JWT authentication\n";
+        std::cout << "  • Remote command execution\n";
+        std::cout << "  • Vault access from mobile\n";
+        std::cout << "  • Real-time notifications\n\n";
+        std::cout << "🔧 To start: mobile-api-start [port]\n";
+        return 0;
+    };
+    registry_->register_command(mobile_api_status_cmd);
+
+    // Remote Desktop commands
+    CommandInfo remote_desktop_start_cmd;
+    remote_desktop_start_cmd.name = "remote-desktop-start";
+    remote_desktop_start_cmd.description = "Start remote desktop server for machine control";
+    remote_desktop_start_cmd.usage = "remote-desktop-start [port]";
+    remote_desktop_start_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to start remote desktop server.\n";
+            return 1;
+        }
+
+        int port = 5900;
+        if (!ctx.args.empty()) {
+            try {
+                port = std::stoi(ctx.args[0]);
+            } catch (...) {
+                std::cout << "Invalid port number.\n";
+                return 1;
+            }
+        }
+
+        std::cout << "Remote Desktop Server\n";
+        std::cout << "=====================\n\n";
+        std::cout << "🚧 Remote desktop implementation in progress\n";
+        std::cout << "🖥️ Features planned:\n";
+        std::cout << "  • Screen capture and transmission\n";
+        std::cout << "  • Keyboard/mouse input forwarding\n";
+        std::cout << "  • Real-time screen updates\n";
+        std::cout << "  • Secure VNC/RDP-like protocol\n";
+        std::cout << "  • Multi-session support\n\n";
+        std::cout << "🔧 Would start server on port: " << port << "\n";
+        std::cout << "🌐 Remote clients can connect to: " << port << "\n";
+        return 0;
+    };
+    registry_->register_command(remote_desktop_start_cmd);
+
+    CommandInfo remote_desktop_sessions_cmd;
+    remote_desktop_sessions_cmd.name = "remote-desktop-sessions";
+    remote_desktop_sessions_cmd.description = "List active remote desktop sessions";
+    remote_desktop_sessions_cmd.usage = "remote-desktop-sessions";
+    remote_desktop_sessions_cmd.handler = [](const CommandContext& ctx) -> int {
+        std::cout << "Active Remote Desktop Sessions\n";
+        std::cout << "===============================\n\n";
+        std::cout << "No active sessions (server not implemented yet)\n\n";
+        std::cout << "📊 When implemented, this will show:\n";
+        std::cout << "  • Session ID and client IP\n";
+        std::cout << "  • Connection time and duration\n";
+        std::cout << "  • Screen resolution and quality\n";
+        std::cout << "  • Bandwidth usage\n";
+        return 0;
+    };
+    registry_->register_command(remote_desktop_sessions_cmd);
+
+    // Performance Analytics commands
+    CommandInfo analytics_dashboard_cmd;
+    analytics_dashboard_cmd.name = "analytics-dashboard";
+    analytics_dashboard_cmd.description = "Show AI-powered productivity analytics dashboard";
+    analytics_dashboard_cmd.usage = "analytics-dashboard [--html|--json]";
+    analytics_dashboard_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to view analytics.\n";
+            return 1;
+        }
+
+        auto dashboard = analytics::AnalyticsDashboard();
+        std::string user = auth::Authentication::instance().get_current_user();
+
+        bool html_output = false;
+        if (!ctx.args.empty() && ctx.args[0] == "--html") {
+            html_output = true;
+        }
+
+        if (html_output) {
+            std::string html = dashboard.generate_html_dashboard(user);
+            std::cout << "Analytics dashboard HTML generated (" << html.length() << " characters)\n";
+            std::cout << "In production, this would open in a web browser or save to file.\n\n";
+
+            // Show a summary instead
+            auto insights = analytics::PerformanceAnalytics().generate_insights(user);
+            if (!insights.empty()) {
+                std::cout << "📊 Key Insights:\n";
+                for (size_t i = 0; i < std::min(size_t(3), insights.size()); ++i) {
+                    std::cout << "  " << insights[i].title << ": " << insights[i].description << "\n";
+                }
+            }
+        } else {
+            std::string json = dashboard.generate_json_dashboard(user);
+            std::cout << "Analytics Dashboard (JSON)\n";
+            std::cout << "==========================\n\n";
+            std::cout << json << "\n";
+        }
+
+        return 0;
+    };
+    registry_->register_command(analytics_dashboard_cmd);
+
+    CommandInfo analytics_insights_cmd;
+    analytics_insights_cmd.name = "analytics-insights";
+    analytics_insights_cmd.description = "Generate AI-powered productivity insights";
+    analytics_insights_cmd.usage = "analytics-insights";
+    analytics_insights_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to generate insights.\n";
+            return 1;
+        }
+
+        std::string user = auth::Authentication::instance().get_current_user();
+        analytics::PerformanceAnalytics analytics;
+
+        std::cout << "🤖 AI-Powered Productivity Insights\n";
+        std::cout << "===================================\n\n";
+
+        auto insights = analytics.generate_insights(user);
+        for (const auto& insight : insights) {
+            std::string icon;
+            if (insight.category == "efficiency") icon = "⚡";
+            else if (insight.category == "learning") icon = "📚";
+            else if (insight.category == "security") icon = "🔒";
+            else if (insight.category == "optimization") icon = "🔧";
+            else icon = "💡";
+
+            std::cout << icon << " " << insight.title << "\n";
+            std::cout << "  " << insight.description << "\n";
+            std::cout << "  💡 " << insight.recommendation << "\n";
+            std::cout << "  📊 Impact: " << (insight.impact_score > 0 ? "+" : "") << insight.impact_score << "\n\n";
+        }
+
+        // Show productivity score
+        double prod_score = analytics.calculate_productivity_score(user);
+        std::cout << "🎯 Overall Productivity Score: " << std::fixed << std::setprecision(1) << prod_score << "/100\n\n";
+
+        // Show recommendations
+        auto recommendations = analytics.generate_learning_recommendations(user);
+        if (!recommendations.empty()) {
+            std::cout << "🎓 Learning Recommendations:\n";
+            for (const auto& rec : recommendations) {
+                std::cout << "  • " << rec << "\n";
+            }
+            std::cout << "\n";
+        }
+
+        return 0;
+    };
+    registry_->register_command(analytics_insights_cmd);
+
+    CommandInfo analytics_metrics_cmd;
+    analytics_metrics_cmd.name = "analytics-metrics";
+    analytics_metrics_cmd.description = "Show detailed performance metrics";
+    analytics_metrics_cmd.usage = "analytics-metrics [metric_name]";
+    analytics_metrics_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to view metrics.\n";
+            return 1;
+        }
+
+        analytics::PerformanceAnalytics analytics;
+        std::string user = auth::Authentication::instance().get_current_user();
+
+        std::cout << "📊 Performance Metrics\n";
+        std::cout << "======================\n\n";
+
+        auto metrics = analytics.get_efficiency_metrics(user);
+        for (const auto& metric : metrics) {
+            std::cout << metric.first << ": ";
+            if (metric.first.find("rate") != std::string::npos) {
+                std::cout << std::fixed << std::setprecision(2) << (metric.second * 100) << "%";
+            } else if (metric.first.find("time") != std::string::npos) {
+                std::cout << std::fixed << std::setprecision(2) << metric.second << "ms";
+            } else {
+                std::cout << std::fixed << std::setprecision(2) << metric.second;
+            }
+            std::cout << "\n";
+        }
+
+        std::cout << "\n🔍 Recent Activity:\n";
+        // Would show recent metrics from database
+
+        return 0;
+    };
+    registry_->register_command(analytics_metrics_cmd);
+
+    // P2P File Sharing commands
+    CommandInfo p2p_start_cmd;
+    p2p_start_cmd.name = "p2p-start";
+    p2p_start_cmd.description = "Start P2P file sharing server";
+    p2p_start_cmd.usage = "p2p-start [port]";
+    p2p_start_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use P2P sharing.\n";
+            return 1;
+        }
+
+        uint16_t port = 8888;
+        if (!ctx.args.empty()) {
+            try {
+                port = static_cast<uint16_t>(std::stoi(ctx.args[0]));
+            } catch (...) {
+                std::cout << "Invalid port number.\n";
+                return 1;
+            }
+        }
+
+        if (p2p::FileSharing::instance().start_server(port)) {
+            std::cout << "P2P file sharing server started on port " << port << "\n";
+            std::cout << "Files will be stored locally in: .customos/p2p/shares/\n";
+            std::cout << "Only metadata is stored in the database.\n";
+            return 0;
+        } else {
+            std::cout << "Failed to start P2P server.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(p2p_start_cmd);
+
+
+    CommandInfo p2p_list_cmd;
+    p2p_list_cmd.name = "p2p-list";
+    p2p_list_cmd.description = "List shared P2P files (from database metadata)";
+    p2p_list_cmd.usage = "p2p-list";
+    p2p_list_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to view shared files.\n";
+            return 1;
+        }
+
+        (void)ctx; // Suppress unused parameter warning
+
+        auto files = p2p::FileSharing::instance().list_shared_files();
+        if (files.empty()) {
+            std::cout << "No files shared.\n";
+            std::cout << "Use 'p2p-share <file>' to share a file.\n";
+            return 0;
+        }
+
+        std::cout << "Shared P2P Files:\n";
+        std::cout << "=================\n";
+        for (const auto& file : files) {
+            std::cout << "📄 " << file.filename << " (ID: " << file.id << ")\n";
+            std::cout << "   Size: " << file.size << " bytes\n";
+            std::cout << "   Checksum: " << file.checksum.substr(0, 16) << "...\n";
+            std::cout << "   Local Path: " << file.filepath << "\n";  // Shows local storage
+            std::cout << "   " << (file.is_public ? "🌐 Public" : "🔒 Private") << "\n\n";
+        }
+
+        std::cout << "💡 Files are stored locally on your PC, not in the database!\n";
+        std::cout << "   Database only contains metadata for efficient sharing.\n";
+        return 0;
+    };
+    registry_->register_command(p2p_list_cmd);
+
+    CommandInfo p2p_unshare_cmd;
+    p2p_unshare_cmd.name = "p2p-unshare";
+    p2p_unshare_cmd.description = "Remove a shared P2P file (deletes from local storage and DB)";
+    p2p_unshare_cmd.usage = "p2p-unshare <share_id>";
+    p2p_unshare_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to unshare files.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: p2p-unshare <share_id>\n";
+            std::cout << "Use 'p2p-list' to see share IDs.\n";
+            return 1;
+        }
+
+        if (p2p::FileSharing::instance().unshare_file(ctx.args[0])) {
+            std::cout << "✅ File unshared successfully!\n";
+            std::cout << "File removed from local storage and database metadata.\n";
+            return 0;
+        } else {
+            std::cout << "❌ Failed to unshare file.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(p2p_unshare_cmd);
+
+    // Advanced Remote Desktop commands
+    CommandInfo remote_desktop_terminals_cmd;
+    remote_desktop_terminals_cmd.name = "remote-desktop-terminals";
+    remote_desktop_terminals_cmd.description = "List available terminal sessions for remote access";
+    remote_desktop_terminals_cmd.usage = "remote-desktop-terminals";
+    remote_desktop_terminals_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to access remote desktop.\n";
+            return 1;
+        }
+
+        auto terminals = remote::RemoteDesktopServer::instance().enumerate_terminal_sessions();
+
+        if (terminals.empty()) {
+            std::cout << "No terminal sessions found.\n";
+            std::cout << "Make sure you have terminal windows open.\n";
+            return 0;
+        }
+
+        std::cout << "Available Terminal Sessions:\n";
+        std::cout << "===========================\n";
+        for (const auto& terminal : terminals) {
+            std::cout << "🖥️  " << terminal.window_title << "\n";
+            std::cout << "   ID: " << terminal.session_id << "\n";
+            std::cout << "   Type: " << terminal.terminal_type << "\n";
+            std::cout << "   Process: " << terminal.process_id << "\n";
+            std::cout << "   Active: " << (terminal.is_active ? "Yes" : "No") << "\n";
+            std::cout << "   Bounds: " << terminal.window_bounds.left << ","
+                     << terminal.window_bounds.top << " -> "
+                     << terminal.window_bounds.right << ","
+                     << terminal.window_bounds.bottom << "\n\n";
+        }
+
+        std::cout << "💡 Use 'remote-desktop-switch <session_id>' to switch to a terminal\n";
+        std::cout << "💡 Use 'remote-desktop-capture-terminal <session_id>' to capture specific terminal\n";
+        return 0;
+    };
+    registry_->register_command(remote_desktop_terminals_cmd);
+
+    CommandInfo remote_desktop_switch_cmd;
+    remote_desktop_switch_cmd.name = "remote-desktop-switch";
+    remote_desktop_switch_cmd.description = "Switch to a specific terminal session";
+    remote_desktop_switch_cmd.usage = "remote-desktop-switch <session_id>";
+    remote_desktop_switch_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to access remote desktop.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: remote-desktop-switch <session_id>\n";
+            std::cout << "Use 'remote-desktop-terminals' to see available sessions.\n";
+            return 1;
+        }
+
+        if (remote::RemoteDesktopServer::instance().switch_to_terminal_session(ctx.args[0])) {
+            std::cout << "✅ Switched to terminal session: " << ctx.args[0] << "\n";
+            return 0;
+        } else {
+            std::cout << "❌ Failed to switch to terminal session.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(remote_desktop_switch_cmd);
+
+    CommandInfo remote_desktop_capture_terminal_cmd;
+    remote_desktop_capture_terminal_cmd.name = "remote-desktop-capture-terminal";
+    remote_desktop_capture_terminal_cmd.description = "Capture screen of specific terminal session";
+    remote_desktop_capture_terminal_cmd.usage = "remote-desktop-capture-terminal <session_id>";
+    remote_desktop_capture_terminal_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to access remote desktop.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: remote-desktop-capture-terminal <session_id>\n";
+            std::cout << "Use 'remote-desktop-terminals' to see available sessions.\n";
+            return 1;
+        }
+
+        remote::ScreenCapture capture;
+        if (remote::RemoteDesktopServer::instance().capture_terminal_session(ctx.args[0], capture)) {
+            std::cout << "✅ Captured terminal session: " << ctx.args[0] << "\n";
+            std::cout << "📐 Resolution: " << capture.width << "x" << capture.height << "\n";
+            std::cout << "📊 Data size: " << capture.data.size() << " bytes\n";
+            std::cout << "🖼️  Full screen: " << (capture.is_fullscreen ? "Yes" : "No") << "\n";
+            return 0;
+        } else {
+            std::cout << "❌ Failed to capture terminal session.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(remote_desktop_capture_terminal_cmd);
+
+    CommandInfo remote_desktop_displays_cmd;
+    remote_desktop_displays_cmd.name = "remote-desktop-displays";
+    remote_desktop_displays_cmd.description = "List available displays/monitors";
+    remote_desktop_displays_cmd.usage = "remote-desktop-displays";
+    remote_desktop_displays_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to access remote desktop.\n";
+            return 1;
+        }
+
+        auto displays = remote::RemoteDesktopServer::instance().enumerate_displays();
+
+        if (displays.empty()) {
+            std::cout << "No displays found.\n";
+            return 0;
+        }
+
+        std::cout << "Available Displays:\n";
+        std::cout << "===================\n";
+        for (size_t i = 0; i < displays.size(); ++i) {
+            std::cout << i + 1 << ". " << displays[i] << "\n";
+        }
+
+        std::cout << "\n💡 Use 'remote-desktop-fullscreen' for complete desktop access\n";
+        std::cout << "💡 Use 'remote-desktop-set-display <name>' to focus on specific display\n";
+        return 0;
+    };
+    registry_->register_command(remote_desktop_displays_cmd);
+
+    CommandInfo remote_desktop_fullscreen_cmd;
+    remote_desktop_fullscreen_cmd.name = "remote-desktop-fullscreen";
+    remote_desktop_fullscreen_cmd.description = "Capture full desktop across all monitors";
+    remote_desktop_fullscreen_cmd.usage = "remote-desktop-fullscreen";
+    remote_desktop_fullscreen_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to access remote desktop.\n";
+            return 1;
+        }
+
+        auto capture = remote::RemoteDesktopServer::instance().capture_full_desktop();
+
+        if (!capture.data.empty()) {
+            std::cout << "✅ Captured full desktop\n";
+            std::cout << "📐 Resolution: " << capture.width << "x" << capture.height << "\n";
+            std::cout << "📊 Data size: " << capture.data.size() << " bytes\n";
+            std::cout << "🖼️  Full screen: " << (capture.is_fullscreen ? "Yes" : "No") << "\n";
+            std::cout << "🖥️  Display: " << (capture.display_name.empty() ? "All displays" : capture.display_name) << "\n";
+
+            std::cout << "\n💡 This capture includes:\n";
+            std::cout << "   • All monitors in multi-monitor setups\n";
+            std::cout << "   • All visible windows and applications\n";
+            std::cout << "   • Desktop wallpaper and icons\n";
+            std::cout << "   • Taskbar and system UI elements\n\n";
+
+            std::cout << "🌐 Perfect for complete remote desktop access!\n";
+            return 0;
+        } else {
+            std::cout << "❌ Failed to capture full desktop.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(remote_desktop_fullscreen_cmd);
+
+    CommandInfo remote_desktop_set_display_cmd;
+    remote_desktop_set_display_cmd.name = "remote-desktop-set-display";
+    remote_desktop_set_display_cmd.description = "Set active display for remote desktop capture";
+    remote_desktop_set_display_cmd.usage = "remote-desktop-set-display <display_name>";
+    remote_desktop_set_display_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to access remote desktop.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: remote-desktop-set-display <display_name>\n";
+            std::cout << "Use 'remote-desktop-displays' to see available displays.\n";
+            return 1;
+        }
+
+        if (remote::RemoteDesktopServer::instance().set_active_display(ctx.args[0])) {
+            std::cout << "✅ Set active display to: " << ctx.args[0] << "\n";
+            std::cout << "📺 Remote desktop will now focus on this display.\n";
+            return 0;
+        } else {
+            std::cout << "❌ Display not found: " << ctx.args[0] << "\n";
+            return 1;
+        }
+    };
+    registry_->register_command(remote_desktop_set_display_cmd);
+
+    CommandInfo remote_desktop_windows_cmd;
+    remote_desktop_windows_cmd.name = "remote-desktop-windows";
+    remote_desktop_windows_cmd.description = "List all visible windows for remote access";
+    remote_desktop_windows_cmd.usage = "remote-desktop-windows";
+    remote_desktop_windows_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to access remote desktop.\n";
+            return 1;
+        }
+
+        auto windows = remote::RemoteDesktopServer::instance().enumerate_windows();
+
+        if (windows.empty()) {
+            std::cout << "No visible windows found.\n";
+            return 0;
+        }
+
+        std::cout << "Visible Windows:\n";
+        std::cout << "================\n";
+        for (size_t i = 0; i < windows.size(); ++i) {
+            const auto& [hwnd, title] = windows[i];
+            std::cout << i + 1 << ". " << title << "\n";
+            std::cout << "   Handle: " << std::hex << (uintptr_t)hwnd << std::dec << "\n\n";
+        }
+
+        std::cout << "💡 Use window handles to capture specific applications\n";
+        std::cout << "💡 Terminal windows are automatically detected by 'remote-desktop-terminals'\n";
+        return 0;
+    };
+    registry_->register_command(remote_desktop_windows_cmd);
 
     // SSH Remote Shell Access commands
     CommandInfo ssh_start_cmd;
@@ -3241,18 +4686,451 @@ void CommandProcessor::register_builtin_commands() {
     registry_->register_command(env_create_cmd);
 }
 
+void CommandProcessor::register_scheduler_commands() {
+    // Task Scheduling commands
+    CommandInfo task_schedule_cmd;
+    task_schedule_cmd.name = "task-schedule";
+    task_schedule_cmd.description = "Schedule a task to run at a specific time";
+    task_schedule_cmd.usage = "task-schedule <title> <command> <time_t> [daily|weekly|monthly]";
+    task_schedule_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to schedule tasks.\n";
+            return 1;
+        }
+
+        if (ctx.args.size() < 3) {
+            std::cout << "Usage: task-schedule <title> <command> <time_t> [daily|weekly|monthly]\n";
+            std::cout << "Example: task-schedule \"backup\" \"git commit -m backup\" 1640995200 daily\n";
+            return 1;
+        }
+
+        std::string title = ctx.args[0];
+        std::string command = ctx.args[1];
+        time_t scheduled_time;
+
+        try {
+            scheduled_time = static_cast<time_t>(std::stoll(ctx.args[2]));
+        } catch (...) {
+            std::cout << "Invalid time format. Use Unix timestamp.\n";
+            return 1;
+        }
+
+        scheduler::RecurrenceType recurrence = scheduler::RecurrenceType::ONCE;
+        if (ctx.args.size() > 3) {
+            std::string rec_str = ctx.args[3];
+            if (rec_str == "daily") recurrence = scheduler::RecurrenceType::DAILY;
+            else if (rec_str == "weekly") recurrence = scheduler::RecurrenceType::WEEKLY;
+            else if (rec_str == "monthly") recurrence = scheduler::RecurrenceType::MONTHLY;
+        }
+
+        std::string task_id = scheduler::TaskScheduler::instance().schedule_task(title, command, scheduled_time, recurrence);
+        if (!task_id.empty()) {
+            std::cout << "✅ Task '" << title << "' scheduled successfully!\n";
+            std::cout << "Task ID: " << task_id << "\n";
+            std::cout << "Scheduled for: " << std::ctime(&scheduled_time);
+            if (recurrence != scheduler::RecurrenceType::ONCE) {
+                std::cout << "Recurrence: ";
+                switch (recurrence) {
+                    case scheduler::RecurrenceType::DAILY: std::cout << "Daily\n"; break;
+                    case scheduler::RecurrenceType::WEEKLY: std::cout << "Weekly\n"; break;
+                    case scheduler::RecurrenceType::MONTHLY: std::cout << "Monthly\n"; break;
+                    default: break;
+                }
+            }
+            return 0;
+        } else {
+            std::cout << "❌ Failed to schedule task.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(task_schedule_cmd);
+
+    CommandInfo task_list_cmd;
+    task_list_cmd.name = "task-list";
+    task_list_cmd.description = "List scheduled tasks";
+    task_list_cmd.usage = "task-list [category]";
+    task_list_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to view tasks.\n";
+            return 1;
+        }
+
+        std::string category;
+        if (!ctx.args.empty()) {
+            category = ctx.args[0];
+        }
+
+        auto tasks = scheduler::TaskScheduler::instance().list_tasks(category);
+        if (tasks.empty()) {
+            std::cout << "No scheduled tasks found.\n";
+            std::cout << "Use 'task-schedule' to create one.\n";
+            return 0;
+        }
+
+        std::cout << "Scheduled Tasks:\n";
+        std::cout << "================\n";
+        for (const auto& task : tasks) {
+            std::cout << "📋 " << task.title << " (ID: " << task.id << ")\n";
+            std::cout << "   Command: " << task.command << "\n";
+            std::cout << "   Scheduled: " << std::ctime(&task.scheduled_time);
+            std::cout << "   Status: ";
+            switch (task.status) {
+                case scheduler::TaskStatus::PENDING: std::cout << "Pending"; break;
+                case scheduler::TaskStatus::RUNNING: std::cout << "Running"; break;
+                case scheduler::TaskStatus::COMPLETED: std::cout << "Completed"; break;
+                case scheduler::TaskStatus::FAILED: std::cout << "Failed"; break;
+                case scheduler::TaskStatus::CANCELLED: std::cout << "Cancelled"; break;
+            }
+            std::cout << "\n   Enabled: " << (task.enabled ? "Yes" : "No") << "\n";
+            if (task.execution_count > 0) {
+                std::cout << "   Executions: " << task.execution_count << "\n";
+                if (task.last_run > 0) {
+                    std::cout << "   Last run: " << std::ctime(&task.last_run);
+                }
+            }
+            std::cout << "\n";
+        }
+        return 0;
+    };
+    registry_->register_command(task_list_cmd);
+
+    CommandInfo task_cancel_cmd;
+    task_cancel_cmd.name = "task-cancel";
+    task_cancel_cmd.description = "Cancel a scheduled task";
+    task_cancel_cmd.usage = "task-cancel <task_id>";
+    task_cancel_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to cancel tasks.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: task-cancel <task_id>\n";
+            std::cout << "Use 'task-list' to see task IDs.\n";
+            return 1;
+        }
+
+        if (scheduler::TaskScheduler::instance().cancel_task(ctx.args[0])) {
+            std::cout << "✅ Task '" << ctx.args[0] << "' cancelled and removed.\n";
+            return 0;
+        } else {
+            std::cout << "❌ Failed to cancel task '" << ctx.args[0] << "'.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(task_cancel_cmd);
+
+    // Reminder commands
+    CommandInfo remind_cmd;
+    remind_cmd.name = "remind";
+    remind_cmd.description = "Set a reminder";
+    remind_cmd.usage = "remind <title> <message> <minutes>";
+    remind_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to set reminders.\n";
+            return 1;
+        }
+
+        if (ctx.args.size() < 3) {
+            std::cout << "Usage: remind <title> <message> <minutes>\n";
+            std::cout << "Example: remind \"Meeting\" \"Team standup\" 30\n";
+            return 1;
+        }
+
+        std::string title = ctx.args[0];
+        std::string message = ctx.args[1];
+        int minutes;
+
+        try {
+            minutes = std::stoi(ctx.args[2]);
+        } catch (...) {
+            std::cout << "Invalid minutes format.\n";
+            return 1;
+        }
+
+        std::string reminder_id = scheduler::TaskScheduler::instance().remind_in_minutes(title, message, minutes);
+        if (!reminder_id.empty()) {
+            std::cout << "✅ Reminder set for " << minutes << " minutes from now!\n";
+            std::cout << "Reminder ID: " << reminder_id << "\n";
+            std::cout << "Title: " << title << "\n";
+            std::cout << "Message: " << message << "\n";
+            return 0;
+        } else {
+            std::cout << "❌ Failed to set reminder.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(remind_cmd);
+
+    CommandInfo remind_list_cmd;
+    remind_list_cmd.name = "remind-list";
+    remind_list_cmd.description = "List active reminders";
+    remind_list_cmd.usage = "remind-list";
+    remind_list_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to view reminders.\n";
+            return 1;
+        }
+
+        (void)ctx; // Suppress unused parameter warning
+
+        auto reminders = scheduler::TaskScheduler::instance().get_active_reminders();
+        if (reminders.empty()) {
+            std::cout << "No active reminders.\n";
+            std::cout << "Use 'remind' to set one.\n";
+            return 0;
+        }
+
+        std::cout << "Active Reminders:\n";
+        std::cout << "=================\n";
+        for (const auto& reminder : reminders) {
+            std::cout << "🔔 " << reminder.title << " (ID: " << reminder.id << ")\n";
+            std::cout << "   Message: " << reminder.message << "\n";
+            std::cout << "   Time: " << std::ctime(&reminder.reminder_time);
+            std::cout << "   Priority: ";
+            switch (reminder.priority) {
+                case scheduler::TaskPriority::LOW: std::cout << "Low"; break;
+                case scheduler::TaskPriority::NORMAL: std::cout << "Normal"; break;
+                case scheduler::TaskPriority::HIGH: std::cout << "High"; break;
+                case scheduler::TaskPriority::URGENT: std::cout << "Urgent"; break;
+            }
+            std::cout << "\n   Recurring: " << (reminder.recurring ? "Yes" : "No") << "\n\n";
+        }
+        return 0;
+    };
+    registry_->register_command(remind_list_cmd);
+
+    CommandInfo remind_dismiss_cmd;
+    remind_dismiss_cmd.name = "remind-dismiss";
+    remind_dismiss_cmd.description = "Dismiss a reminder";
+    remind_dismiss_cmd.usage = "remind-dismiss <reminder_id>";
+    remind_dismiss_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to dismiss reminders.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: remind-dismiss <reminder_id>\n";
+            std::cout << "Use 'remind-list' to see reminder IDs.\n";
+            return 1;
+        }
+
+        if (scheduler::TaskScheduler::instance().dismiss_reminder(ctx.args[0])) {
+            std::cout << "✅ Reminder '" << ctx.args[0] << "' dismissed and removed.\n";
+            return 0;
+        } else {
+            std::cout << "❌ Failed to dismiss reminder '" << ctx.args[0] << "'.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(remind_dismiss_cmd);
+}
+
+
+void CommandProcessor::register_ai_commands() {
+    // AI Init Command - Initialize AI with Gemini API key
+    CommandInfo ai_init_cmd;
+    ai_init_cmd.name = "ai-init";
+    ai_init_cmd.description = "Initialize AI features with Gemini API key";
+    ai_init_cmd.usage = "ai-init <gemini_api_key>";
+    ai_init_cmd.handler = [](const CommandContext& ctx) -> int {
+        if (!auth::Authentication::instance().is_logged_in()) {
+            std::cout << "You must be logged in to use AI features.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "🤖 AI Features Setup\n";
+            std::cout << "===================\n\n";
+            std::cout << "To enable AI-powered features, you need a Gemini API key.\n";
+            std::cout << "The system will automatically detect the appropriate model.\n\n";
+            std::cout << "How to get your API key:\n";
+            std::cout << "1. Go to: https://ai.google.dev/\n";
+            std::cout << "2. Sign in with your Google account\n";
+            std::cout << "3. Create an API key (free tier available)\n";
+            std::cout << "4. Run: ai-init YOUR_API_KEY\n\n";
+            std::cout << "Available AI commands after setup:\n";
+            std::cout << "  ai-suggest   - Get command suggestions\n";
+            std::cout << "  ai-help      - Get help with coding questions\n";
+            std::cout << "  ai-status    - Check AI module status\n";
+            return 0;
+        }
+
+        std::string api_key = ctx.args[0];
+
+        // Initialize the AI module with auto-detection
+        auto& ai_module = ai::AIModule::instance();
+        if (ai_module.initialize(api_key)) {
+            std::cout << "✅ AI features initialized successfully!\n";
+            std::cout << "Model auto-detected. You can now use AI commands.\n";
+            std::cout << "\nTry: ai-suggest, ai-help\n";
+            return 0;
+        } else {
+            std::cout << "❌ Failed to initialize AI features.\n";
+            std::cout << "Please check your API key and try again.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(ai_init_cmd);
+
+    // AI Status Command
+    CommandInfo ai_status_cmd;
+    ai_status_cmd.name = "ai-status";
+    ai_status_cmd.description = "Check AI module status";
+    ai_status_cmd.usage = "ai-status";
+    ai_status_cmd.handler = [](const CommandContext& ctx) -> int {
+        (void)ctx;
+
+        auto& ai_module = ai::AIModule::instance();
+        std::cout << "🤖 AI Module Status\n";
+        std::cout << "==================\n";
+        std::cout << "Initialized: " << (ai_module.is_initialized() ? "Yes" : "No") << "\n";
+
+        if (ai_module.is_initialized()) {
+            auto config = ai_module.get_config();
+            std::cout << "Suggestions Enabled: " << (config.suggestions_enabled ? "Yes" : "No") << "\n";
+            std::cout << "Learning Enabled: " << (config.learning_enabled ? "Yes" : "No") << "\n";
+            std::cout << "Conversation History: " << (config.maintain_context ? "Enabled" : "Disabled") << "\n";
+            std::cout << "Max Context Length: " << config.max_context_length << "\n";
+        } else {
+            std::cout << "\nRun 'ai-init <api_key>' to enable AI features.\n";
+        }
+        return 0;
+    };
+    registry_->register_command(ai_status_cmd);
+
+    // AI Suggest Command
+    CommandInfo ai_suggest_cmd;
+    ai_suggest_cmd.name = "ai-suggest";
+    ai_suggest_cmd.description = "Get AI-powered command suggestions";
+    ai_suggest_cmd.usage = "ai-suggest [context]";
+    ai_suggest_cmd.handler = [](const CommandContext& ctx) -> int {
+        auto& ai_module = ai::AIModule::instance();
+
+        if (!ai_module.is_initialized()) {
+            std::cout << "AI features not initialized.\n";
+            std::cout << "Run 'ai-init <api_key>' first.\n";
+            return 1;
+        }
+
+        std::string context;
+        for (const auto& arg : ctx.args) {
+            context += arg + " ";
+        }
+
+        auto suggestions = ai_module.get_suggestions(context);
+
+        if (suggestions.empty()) {
+            std::cout << "No suggestions available for the current context.\n";
+            return 0;
+        }
+
+        std::cout << "💡 AI Suggestions:\n";
+        for (size_t i = 0; i < suggestions.size(); ++i) {
+            std::cout << "  " << (i + 1) << ". " << suggestions[i] << "\n";
+        }
+        return 0;
+    };
+    registry_->register_command(ai_suggest_cmd);
+
+    // AI Help Command
+    CommandInfo ai_help_cmd;
+    ai_help_cmd.name = "ai-help";
+    ai_help_cmd.description = "Get AI help with coding questions";
+    ai_help_cmd.usage = "ai-help <question>";
+    ai_help_cmd.handler = [](const CommandContext& ctx) -> int {
+        auto& ai_module = ai::AIModule::instance();
+
+        if (!ai_module.is_initialized()) {
+            std::cout << "AI features not initialized.\n";
+            std::cout << "Run 'ai-init <api_key>' first.\n";
+            return 1;
+        }
+
+        if (ctx.args.empty()) {
+            std::cout << "Usage: ai-help <your question>\n";
+            std::cout << "Example: ai-help \"how do I create a git branch?\"\n";
+            return 1;
+        }
+
+        std::string question;
+        for (const auto& arg : ctx.args) {
+            question += arg + " ";
+        }
+
+        auto response = ai_module.ask(question);
+
+        if (response.success) {
+            std::cout << "🤖 AI Response:\n";
+            std::cout << response.content << "\n";
+            return 0;
+        } else {
+            std::cout << "Failed to get AI response. Please try again.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(ai_help_cmd);
+
+    // AI Disable Command
+    CommandInfo ai_disable_cmd;
+    ai_disable_cmd.name = "ai-disable";
+    ai_disable_cmd.description = "Disable AI features";
+    ai_disable_cmd.usage = "ai-disable";
+    ai_disable_cmd.handler = [](const CommandContext& ctx) -> int {
+        (void)ctx;
+
+        auto& ai_module = ai::AIModule::instance();
+        ai_module.disable();
+        std::cout << "✅ AI features disabled.\n";
+        return 0;
+    };
+    registry_->register_command(ai_disable_cmd);
+
+    // AI Enable Command
+    CommandInfo ai_enable_cmd;
+    ai_enable_cmd.name = "ai-enable";
+    ai_enable_cmd.description = "Re-enable AI features (if previously initialized)";
+    ai_enable_cmd.usage = "ai-enable";
+    ai_enable_cmd.handler = [](const CommandContext& ctx) -> int {
+        (void)ctx;
+
+        auto& ai_module = ai::AIModule::instance();
+        if (ai_module.enable()) {
+            std::cout << "✅ AI features enabled.\n";
+            return 0;
+        } else {
+            std::cout << "AI not previously initialized.\n";
+            std::cout << "Run 'ai-init <api_key>' first.\n";
+            return 1;
+        }
+    };
+    registry_->register_command(ai_enable_cmd);
+}
+
 // Helper function for showing category help
 void CommandProcessor::show_category_help(const std::string& category_name, const std::vector<std::pair<std::string, std::string>>& commands) {
     std::cout << category_name << " Commands:\n";
     std::cout << std::string(category_name.length() + 10, '=') << "\n\n";
-    
+
     for (const auto& cmd : commands) {
         std::cout << cmd.first << "\n";
         std::cout << "  " << cmd.second << "\n\n";
     }
-    
+
     std::cout << "Type 'help <command>' for detailed usage examples.\n";
     std::cout << "📖 See COMMAND_REFERENCE.md for comprehensive examples.\n";
+}
+
+// Utility functions
+std::vector<std::string> split_string(const std::string& str, char delimiter) {
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream tokenStream(str);
+    while (std::getline(tokenStream, token, delimiter)) {
+        tokens.push_back(token);
+    }
+    return tokens;
 }
 
 } // namespace core

@@ -26,6 +26,16 @@ struct TaskScheduler::Impl {
         return "task_" + std::to_string(next_id++);
     }
 
+    std::string recurrence_to_string(RecurrenceType recurrence) {
+        switch (recurrence) {
+            case RecurrenceType::ONCE: return "once";
+            case RecurrenceType::DAILY: return "daily";
+            case RecurrenceType::WEEKLY: return "weekly";
+            case RecurrenceType::MONTHLY: return "monthly";
+            default: return "once";
+        }
+    }
+
     void scheduler_loop() {
         while (running) {
             check_scheduled_tasks();
@@ -48,23 +58,42 @@ struct TaskScheduler::Impl {
         }
     }
 
-    void execute_task(ScheduledTask& task) {
-        task.status = TaskStatus::RUNNING;
-        task.last_run = time(nullptr);
+void TaskScheduler::execute_task(ScheduledTask& task) {
+    task.status = TaskStatus::RUNNING;
+    task.last_run = time(nullptr);
+    
+    // TODO: Actually execute the command
+    // For now, simulate execution
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    task.status = TaskStatus::COMPLETED;
+    task.execution_count++;
+    
+    // Update task in database
+    auto& db = database::InternalDB::instance();
+    if (task.recurrence == RecurrenceType::ONCE) {
+        // Remove one-time tasks from database after completion
+        db.delete_scheduled_task(task.user, task.id);
         
-        // TODO: Actually execute the command
+        // Also remove from memory
+        std::lock_guard<std::mutex> lock(pimpl_->mutex);
+        pimpl_->tasks.erase(task.id);
         
-        task.status = TaskStatus::COMPLETED;
+        LOG_INFO("One-time task '" + task.title + "' completed and removed from database");
+    } else {
+        // Update recurring task in database
+        db.update_scheduled_task(task.user, task.id, true); // Keep enabled
         
-        if (task_callback) {
-            task_callback(task);
-        }
+        // Schedule next recurrence
+        schedule_next_recurrence(task);
         
-        // Handle recurrence
-        if (task.recurrence != RecurrenceType::ONCE) {
-            schedule_next_recurrence(task);
-        }
+        LOG_INFO("Recurring task '" + task.title + "' completed, next run scheduled");
     }
+    
+    if (pimpl_->task_callback) {
+        pimpl_->task_callback(task);
+    }
+}
 
     void schedule_next_recurrence(ScheduledTask& task) {
         // TODO: Calculate next run time based on recurrence
@@ -74,12 +103,32 @@ struct TaskScheduler::Impl {
         std::lock_guard<std::mutex> lock(mutex);
         
         time_t now = time(nullptr);
+        std::vector<std::string> to_remove;
+        
         for (auto& pair : reminders) {
             if (!pair.second.dismissed && pair.second.reminder_time <= now) {
+                // Trigger reminder
                 if (reminder_callback) {
                     reminder_callback(pair.second);
                 }
+                
+                // Mark as completed in database
+                auto& db = database::InternalDB::instance();
+                db.complete_reminder(pair.second.user, pair.second.id);
+                
+                // For non-recurring reminders, mark for removal
+                if (!pair.second.recurring) {
+                    to_remove.push_back(pair.first);
+                }
+                
+                LOG_INFO("Reminder '" + pair.second.title + "' triggered and completed");
             }
+        }
+        
+        // Remove completed one-time reminders
+        for (const auto& id : to_remove) {
+            reminders.erase(id);
+            LOG_INFO("One-time reminder removed from memory");
         }
     }
 };
@@ -103,10 +152,65 @@ bool TaskScheduler::initialize() {
         return false;
     }
 
+    // Load existing tasks and reminders from database
+    load_from_database();
+
     pimpl_->running = true;
     pimpl_->scheduler_thread = std::thread(&Impl::scheduler_loop, pimpl_.get());
     
+    LOG_INFO("Task scheduler initialized with database persistence");
     return true;
+}
+
+void TaskScheduler::load_from_database() {
+    try {
+        auto& db = database::InternalDB::instance();
+        std::string user = auth::Authentication::instance().get_current_user();
+        
+        if (!user.empty()) {
+            // Load scheduled tasks
+            auto tasks_data = db.get_scheduled_tasks(user);
+            for (const auto& task_data : tasks_data) {
+                ScheduledTask task;
+                task.id = task_data.at("id");
+                task.user = user;
+                task.title = task_data.at("title");
+                task.command = task_data.at("command");
+                // Convert schedule string back to recurrence type
+                std::string schedule = task_data.at("schedule");
+                if (schedule == "daily") task.recurrence = RecurrenceType::DAILY;
+                else if (schedule == "weekly") task.recurrence = RecurrenceType::WEEKLY;
+                else if (schedule == "monthly") task.recurrence = RecurrenceType::MONTHLY;
+                else task.recurrence = RecurrenceType::ONCE;
+                
+                task.status = TaskStatus::PENDING;
+                task.enabled = task_data.at("enabled") == "1";
+                
+                pimpl_->tasks[task.id] = task;
+            }
+            
+            // Load reminders
+            auto reminders_data = db.get_all_reminders(user);
+            for (const auto& reminder_data : reminders_data) {
+                Reminder reminder;
+                reminder.id = reminder_data.at("id");
+                reminder.user = user;
+                reminder.title = reminder_data.at("title");
+                reminder.message = reminder_data.at("message");
+                reminder.reminder_time = static_cast<time_t>(std::stoll(reminder_data.at("remind_at")));
+                reminder.dismissed = reminder_data.at("completed") == "1";
+                
+                if (!reminder.dismissed) {
+                    pimpl_->reminders[reminder.id] = reminder;
+                }
+            }
+        }
+        
+        LOG_INFO("Loaded " + std::to_string(pimpl_->tasks.size()) + " tasks and " + 
+                std::to_string(pimpl_->reminders.size()) + " reminders from database");
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to load scheduler data from database: " + std::string(e.what()));
+    }
 }
 
 void TaskScheduler::shutdown() {
@@ -124,8 +228,15 @@ std::string TaskScheduler::schedule_task(const std::string& title, const std::st
                                           time_t scheduled_time, RecurrenceType recurrence) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
     
+    // Get current user
+    std::string user = auth::Authentication::instance().get_current_user();
+    if (user.empty()) {
+        return "";
+    }
+    
     ScheduledTask task;
     task.id = pimpl_->generate_id();
+    task.user = user;
     task.title = title;
     task.command = command;
     task.scheduled_time = scheduled_time;
@@ -135,7 +246,15 @@ std::string TaskScheduler::schedule_task(const std::string& title, const std::st
     task.created = time(nullptr);
     task.enabled = true;
     
+    // Save to database
+    auto& db = database::InternalDB::instance();
+    if (!db.add_scheduled_task(user, task.id, title, command, 
+                             recurrence_to_string(recurrence), scheduled_time)) {
+        return "";
+    }
+    
     pimpl_->tasks[task.id] = task;
+    LOG_INFO("Task '" + title + "' scheduled for user '" + user + "'");
     return task.id;
 }
 
@@ -145,6 +264,12 @@ bool TaskScheduler::cancel_task(const std::string& task_id) {
     auto it = pimpl_->tasks.find(task_id);
     if (it != pimpl_->tasks.end()) {
         it->second.status = TaskStatus::CANCELLED;
+        
+        // Remove from database
+        auto& db = database::InternalDB::instance();
+        db.delete_scheduled_task(it->second.user, task_id);
+        
+        LOG_INFO("Task '" + it->second.title + "' cancelled and removed from database");
         return true;
     }
     return false;
@@ -226,8 +351,15 @@ std::string TaskScheduler::add_reminder(const std::string& title, const std::str
                                         time_t reminder_time, TaskPriority priority) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
     
+    // Get current user
+    std::string user = auth::Authentication::instance().get_current_user();
+    if (user.empty()) {
+        return "";
+    }
+    
     Reminder reminder;
     reminder.id = pimpl_->generate_id();
+    reminder.user = user;
     reminder.title = title;
     reminder.message = message;
     reminder.reminder_time = reminder_time;
@@ -235,7 +367,15 @@ std::string TaskScheduler::add_reminder(const std::string& title, const std::str
     reminder.dismissed = false;
     reminder.recurring = false;
     
+    // Save to database
+    auto& db = database::InternalDB::instance();
+    if (!db.add_reminder(user, reminder.id, title, message, 
+                        std::to_string(reminder_time))) {
+        return "";
+    }
+    
     pimpl_->reminders[reminder.id] = reminder;
+    LOG_INFO("Reminder '" + title + "' added for user '" + user + "'");
     return reminder.id;
 }
 

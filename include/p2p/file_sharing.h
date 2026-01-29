@@ -48,9 +48,12 @@ struct SharedFile {
     std::string id;
     std::string filename;
     std::string path;
+    std::string filepath;  // Full path to stored file
     uint64_t size;
+    std::string checksum;  // SHA256 checksum
     std::string description;
     bool public_share;
+    bool is_public;        // Alias for public_share
     std::vector<std::string> allowed_peers;
 };
 

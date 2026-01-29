@@ -69,6 +69,13 @@ private:
     PasswordManager(const PasswordManager&) = delete;
     PasswordManager& operator=(const PasswordManager&) = delete;
 
+    // Database operations
+    void load_passwords_from_database();
+    
+    // Cryptographic helpers
+    std::string generate_salt();
+    std::string hash_password(const std::string& password, const std::string& salt);
+
     struct Impl;
     std::unique_ptr<Impl> pimpl_;
 };

@@ -42,6 +42,9 @@ private:
     ParsedCommand parse_command(const std::string& command_line);
     CommandResult execute_parsed_command(const ParsedCommand& cmd);
     void register_builtin_commands();
+    void register_scheduler_commands();
+    void register_ai_commands();
+    void register_plugin_commands();
 
     // Helper function for category help display
     static void show_category_help(const std::string& category_name, const std::vector<std::pair<std::string, std::string>>& commands);

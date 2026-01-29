@@ -84,6 +84,9 @@ private:
     Authentication(const Authentication&) = delete;
     Authentication& operator=(const Authentication&) = delete;
 
+    // Database operations
+    void load_users_from_database();
+
     struct Impl;
     std::unique_ptr<Impl> pimpl_;
 };

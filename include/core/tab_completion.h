@@ -78,6 +78,17 @@ public:
     void enable_smart_completion(bool enabled);
     std::vector<CompletionMatch> get_smart_suggestions(const CompletionContext& context);
 
+    // AI-powered suggestions
+    std::vector<CompletionMatch> get_ai_suggestions(const CompletionContext& context);
+
+    // Learning-based suggestions
+    std::vector<CompletionMatch> get_learned_suggestions(const CompletionContext& context);
+    std::vector<CompletionMatch> get_context_suggestions(const CompletionContext& context);
+
+    // Learning system
+    void learn_from_command(const std::string& command, const std::string& previous_command = "");
+    void load_learning_data();
+
 private:
     TabCompletion();
     ~TabCompletion();
@@ -112,6 +123,18 @@ class DatabaseCompletionProvider : public ICompletionProvider {
 public:
     std::vector<CompletionMatch> get_completions(const CompletionContext& context) override;
     std::string get_name() const override { return "database"; }
+};
+
+class AICompletionProvider : public ICompletionProvider {
+public:
+    std::vector<CompletionMatch> get_completions(const CompletionContext& context) override;
+    std::string get_name() const override { return "ai"; }
+};
+
+class LearningCompletionProvider : public ICompletionProvider {
+public:
+    std::vector<CompletionMatch> get_completions(const CompletionContext& context) override;
+    std::string get_name() const override { return "learning"; }
 };
 
 } // namespace core

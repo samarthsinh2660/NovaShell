@@ -1,7 +1,10 @@
 #include "vault/password_manager.h"
+#include "database/internal_db.h"
+#include "auth/authentication.h"
 #include <map>
 #include <mutex>
 #include <random>
+#include <algorithm>
 #ifdef HAVE_OPENSSL
 #include <openssl/evp.h>
 #include <openssl/aes.h>
@@ -30,17 +33,59 @@ PasswordManager& PasswordManager::instance() {
 
 bool PasswordManager::initialize(const std::string& master_password) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
-    
+
     if (pimpl_->initialized) {
         return false;
     }
 
+    // Get current user
+    std::string current_user = auth::Authentication::instance().get_current_user();
+    if (current_user.empty()) {
+        return false;
+    }
+
+    // Check if vault is already initialized
+    auto& db = database::InternalDB::instance();
+    if (db.is_vault_initialized(current_user)) {
+        return false; // Already initialized
+    }
+
     // TODO: Properly hash master password with salt
-    pimpl_->master_hash = master_password;
+    std::string salt = generate_salt();
+    std::string master_hash = hash_password(master_password, salt);
+
+    // Store master key in database
+    if (!db.initialize_vault(current_user, master_hash, salt)) {
+        return false;
+    }
+
+    pimpl_->master_hash = master_hash;
     pimpl_->initialized = true;
     pimpl_->unlocked = true;
-    
+
+    // Load existing passwords from database
+    load_passwords_from_database();
+
     return true;
+}
+
+void PasswordManager::load_passwords_from_database() {
+    std::string current_user = auth::Authentication::instance().get_current_user();
+    if (current_user.empty()) return;
+
+    auto& db = database::InternalDB::instance();
+    auto passwords_data = db.list_vault_passwords(current_user);
+
+    for (const auto& pwd_data : passwords_data) {
+        PasswordEntry entry;
+        entry.service = pwd_data.at("service");
+        entry.username = pwd_data.at("username");
+        entry.password = pwd_data.at("password");
+        entry.url = pwd_data.at("url");
+        entry.notes = pwd_data.at("notes");
+
+        pimpl_->passwords[entry.service] = entry;
+    }
 }
 
 bool PasswordManager::is_initialized() const {
@@ -50,13 +95,32 @@ bool PasswordManager::is_initialized() const {
 
 bool PasswordManager::unlock(const std::string& master_password) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
-    
+
     if (!pimpl_->initialized) {
         return false;
     }
 
-    if (master_password == pimpl_->master_hash) {
+    std::string current_user = auth::Authentication::instance().get_current_user();
+    if (current_user.empty()) {
+        return false;
+    }
+
+    // Get vault key from database
+    auto& db = database::InternalDB::instance();
+    auto vault_key = db.get_vault_key(current_user);
+
+    if (vault_key.empty()) {
+        return false;
+    }
+
+    // Verify password
+    std::string input_hash = hash_password(master_password, vault_key["salt"]);
+    if (input_hash == vault_key["master_key_hash"]) {
         pimpl_->unlocked = true;
+        pimpl_->master_hash = vault_key["master_key_hash"];
+
+        // Load passwords from database
+        load_passwords_from_database();
         return true;
     }
 
@@ -75,19 +139,55 @@ bool PasswordManager::is_unlocked() const {
 
 bool PasswordManager::change_master_password(const std::string& old_pass, const std::string& new_pass) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
-    
-    if (old_pass == pimpl_->master_hash) {
-        pimpl_->master_hash = new_pass;
-        return true;
+
+    std::string current_user = auth::Authentication::instance().get_current_user();
+    if (current_user.empty()) {
+        return false;
     }
 
-    return false;
+    // Get current vault key from database
+    auto& db = database::InternalDB::instance();
+    auto vault_key = db.get_vault_key(current_user);
+
+    if (vault_key.empty()) {
+        return false;
+    }
+
+    // Verify old password
+    std::string old_hash = hash_password(old_pass, vault_key["salt"]);
+    if (old_hash != vault_key["master_key_hash"]) {
+        return false;
+    }
+
+    // Generate new salt and hash for new password
+    std::string new_salt = generate_salt();
+    std::string new_master_hash = hash_password(new_pass, new_salt);
+
+    // Update in database
+    if (!db.initialize_vault(current_user, new_master_hash, new_salt)) {
+        return false;
+    }
+
+    pimpl_->master_hash = new_master_hash;
+    return true;
 }
 
 bool PasswordManager::add_password(const PasswordEntry& entry) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
-    
+
     if (!pimpl_->unlocked) {
+        return false;
+    }
+
+    std::string current_user = auth::Authentication::instance().get_current_user();
+    if (current_user.empty()) {
+        return false;
+    }
+
+    // Save to database
+    auto& db = database::InternalDB::instance();
+    if (!db.add_vault_password(current_user, entry.service, entry.username,
+                              entry.password, entry.url, entry.notes)) {
         return false;
     }
 
@@ -97,8 +197,20 @@ bool PasswordManager::add_password(const PasswordEntry& entry) {
 
 bool PasswordManager::update_password(const std::string& service, const PasswordEntry& entry) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
-    
+
     if (!pimpl_->unlocked) {
+        return false;
+    }
+
+    std::string current_user = auth::Authentication::instance().get_current_user();
+    if (current_user.empty()) {
+        return false;
+    }
+
+    // Update in database
+    auto& db = database::InternalDB::instance();
+    if (!db.update_vault_password(current_user, service, entry.username,
+                                 entry.password, entry.url, entry.notes)) {
         return false;
     }
 
@@ -108,12 +220,63 @@ bool PasswordManager::update_password(const std::string& service, const Password
 
 bool PasswordManager::delete_password(const std::string& service) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
-    
+
     if (!pimpl_->unlocked) {
         return false;
     }
 
+    std::string current_user = auth::Authentication::instance().get_current_user();
+    if (current_user.empty()) {
+        return false;
+    }
+
+    // Delete from database
+    auto& db = database::InternalDB::instance();
+    if (!db.delete_vault_password(current_user, service)) {
+        return false;
+    }
+
     return pimpl_->passwords.erase(service) > 0;
+}
+
+std::string PasswordManager::hash_password(const std::string& password, const std::string& salt) {
+    std::string salted = password + salt;
+#ifdef HAVE_OPENSSL
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(salted.c_str()), salted.length(), hash);
+
+    std::string result;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        char buf[3];
+        snprintf(buf, sizeof(buf), "%02x", hash[i]);
+        result += buf;
+    }
+    return result;
+#else
+    // Fallback: simple hash when OpenSSL not available (NOT SECURE)
+    return password + salt + "_insecure_hash";
+#endif
+}
+
+std::string PasswordManager::generate_salt() {
+#ifdef HAVE_OPENSSL
+    unsigned char salt[16];
+    RAND_bytes(salt, sizeof(salt));
+
+    std::string result;
+    for (int i = 0; i < 16; i++) {
+        char buf[3];
+        snprintf(buf, sizeof(buf), "%02x", salt[i]);
+        result += buf;
+    }
+    return result;
+#else
+    // Fallback: pseudo-random salt when OpenSSL not available (NOT SECURE)
+    srand(static_cast<unsigned int>(time(nullptr)));
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%016x", rand());
+    return std::string(buf);
+#endif
 }
 
 customos::optional<PasswordEntry> PasswordManager::get_password(const std::string& service) {

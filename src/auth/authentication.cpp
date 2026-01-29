@@ -1,6 +1,11 @@
 #include "auth/authentication.h"
+#include "database/internal_db.h"
 #include <map>
 #include <mutex>
+#include <random>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 #ifdef HAVE_OPENSSL
 #include <openssl/sha.h>
 #include <openssl/rand.h>
@@ -67,8 +72,43 @@ struct Authentication::Impl {
 };
 
 Authentication::Authentication() : pimpl_(std::make_unique<Impl>()) {
-    // Create default admin user
-    create_user("admin", "admin", UserRole::ADMIN);
+    // Load existing users from database
+    load_users_from_database();
+
+    // Create default admin user if no users exist
+    if (pimpl_->users.empty()) {
+        create_user("admin", "admin", UserRole::ADMIN);
+    }
+}
+
+void Authentication::load_users_from_database() {
+    auto& db = database::InternalDB::instance();
+    auto users_data = db.list_users();
+
+    for (const auto& user_data : users_data) {
+        UserData user;
+        user.username = user_data.at("username");
+
+        // Get full user details
+        auto full_user_data = db.get_user(user.username);
+        if (!full_user_data.empty()) {
+            user.password_hash = full_user_data.at("password_hash");
+            user.salt = full_user_data.at("salt");
+
+            // Parse role
+            std::string role_str = full_user_data.at("role");
+            if (role_str == "admin") user.role = UserRole::ADMIN;
+            else if (role_str == "user") user.role = UserRole::USER;
+            else user.role = UserRole::GUEST;
+
+            // Parse permissions
+            user.permissions = static_cast<uint32_t>(std::stoi(full_user_data.at("permissions")));
+            user.active = full_user_data.at("active") == "1";
+            user.home_directory = full_user_data.at("home_directory");
+
+            pimpl_->users[user.username] = user;
+        }
+    }
 }
 
 Authentication::~Authentication() = default;
@@ -92,15 +132,30 @@ bool Authentication::create_user(const std::string& username, const std::string&
     user.role = role;
     user.active = true;
     user.home_directory = "/" + username;
-    
+
     // Set permissions based on role
     if (role == UserRole::ADMIN) {
         user.permissions = static_cast<uint32_t>(Permission::ALL);
     } else if (role == UserRole::USER) {
-        user.permissions = static_cast<uint32_t>(Permission::VFS_READ | Permission::VFS_WRITE | 
+        user.permissions = static_cast<uint32_t>(Permission::VFS_READ | Permission::VFS_WRITE |
                                                   Permission::SCRIPT_RUN | Permission::VAULT_READ | Permission::VAULT_WRITE);
     } else {
         user.permissions = static_cast<uint32_t>(Permission::VFS_READ);
+    }
+
+    // Convert role enum to string
+    std::string role_str;
+    switch (role) {
+        case UserRole::ADMIN: role_str = "admin"; break;
+        case UserRole::USER: role_str = "user"; break;
+        case UserRole::GUEST: role_str = "guest"; break;
+    }
+
+    // Save to database
+    auto& db = database::InternalDB::instance();
+    if (!db.create_user(username, user.password_hash, user.salt, role_str,
+                       user.permissions, user.home_directory)) {
+        return false;
     }
 
     pimpl_->users[username] = user;
@@ -109,6 +164,13 @@ bool Authentication::create_user(const std::string& username, const std::string&
 
 bool Authentication::delete_user(const std::string& username) {
     std::lock_guard<std::mutex> lock(pimpl_->mutex);
+
+    // Delete from database first
+    auto& db = database::InternalDB::instance();
+    if (!db.delete_user(username)) {
+        return false;
+    }
+
     return pimpl_->users.erase(username) > 0;
 }
 
@@ -127,6 +189,13 @@ bool Authentication::change_password(const std::string& username, const std::str
 
     it->second.salt = pimpl_->generate_salt();
     it->second.password_hash = pimpl_->hash_password(new_pass, it->second.salt);
+
+    // Update in database
+    auto& db = database::InternalDB::instance();
+    if (!db.update_user(username, it->second.password_hash, it->second.salt, it->second.permissions)) {
+        return false;
+    }
+
     return true;
 }
 

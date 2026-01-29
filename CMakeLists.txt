@@ -192,8 +192,8 @@ set(UTILS_SOURCES
 )
 
 set(AI_SOURCES
-    # Disabled - requires libcurl which is not installed
-    # src/ai/command_suggester.cpp
+    src/ai/ai_module.cpp
+    src/ai/ai_prompt_manager.cpp
 )
 
 set(UI_SOURCES
@@ -202,10 +202,21 @@ set(UI_SOURCES
 
 set(ANALYTICS_SOURCES
     src/analytics/dashboard.cpp
+    src/analytics/performance_analytics.cpp
 )
 
 set(REMOTE_SOURCES
     src/remote/ssh_server.cpp
+    src/remote/remote_desktop.cpp
+)
+
+set(HTTP_SOURCES
+    src/network/http_server.cpp
+)
+
+set(MOBILE_SOURCES
+    # Disabled - requires external libraries (nlohmann/json, jwt-cpp)
+    # src/mobile/mobile_api.cpp
 )
 
 set(CONTAINERS_SOURCES
@@ -248,6 +259,7 @@ add_executable(customos-shell
     ${VFS_SOURCES}
     ${AUTH_SOURCES}
     ${NETWORK_SOURCES}
+    ${HTTP_SOURCES}
     ${VAULT_SOURCES}
     ${SCRIPTING_SOURCES}
     ${PLUGIN_SOURCES}
