@@ -55,6 +55,8 @@ struct SharedFile {
     bool public_share;
     bool is_public;        // Alias for public_share
     std::vector<std::string> allowed_peers;
+    std::string owner;     // Owner username
+    time_t shared_at;      // Timestamp when file was shared
 };
 
 // Peer-to-Peer File Sharing

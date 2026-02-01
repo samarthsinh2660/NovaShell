@@ -6,6 +6,7 @@
 #include <random>
 #include <sstream>
 #include <iomanip>
+#include <mutex>
 #include <openssl/sha.h>
 
 namespace fs = std::filesystem;

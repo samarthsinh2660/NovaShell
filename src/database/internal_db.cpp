@@ -241,6 +241,7 @@ struct InternalDB::Impl {
                 FOREIGN KEY(share_id) REFERENCES p2p_shares(id)
             )
         )");
+        return true;
     }
 };
 
